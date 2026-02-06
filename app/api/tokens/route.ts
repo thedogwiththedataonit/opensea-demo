@@ -19,7 +19,7 @@ import { tokens } from "@/app/lib/data/tokens";
 import { ensurePriceEngine, getSparklineData } from "@/app/lib/price-engine";
 import { simulateLatency, simulateDbLatency } from "@/app/lib/utils";
 import { SpanStatusCode } from "@opentelemetry/api";
-import { apiTracer, mongoTracer, redisTracer, withSpan, MarketplaceAttributes as MA, recordEdgeHeaders, tagSpanService } from "@/app/lib/tracing";
+import { apiTracer, mongoTracer, redisTracer, withSpan, MarketplaceAttributes as MA, recordEdgeHeaders, tagSpanService, emitEdgeMiddlewareSpan } from "@/app/lib/tracing";
 import { handleRouteError } from "@/app/lib/error-handler";
 import { maybeFault } from "@/app/lib/busybox";
 import { ValidationError } from "@/app/lib/errors";
@@ -50,6 +50,7 @@ export async function GET(request: NextRequest) {
     },
   }, async (rootSpan) => {
     tagSpanService(rootSpan, 'opensea-api-gateway');
+    emitEdgeMiddlewareSpan(request.headers);
     recordEdgeHeaders(rootSpan, request.headers);
     const _start = Date.now();
     log.info('api-gateway', 'GET /api/tokens', { tab, chain, sort, order, limit, offset });
