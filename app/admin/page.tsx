@@ -30,7 +30,22 @@ const FAULT_LABELS: Record<keyof BusyboxFaults, { label: string; desc: string }>
 };
 
 const RPS_OPTIONS = [0.5, 1, 2, 5, 10, 20];
+const DURATION_OPTIONS: { value: number; label: string }[] = [
+  { value: 10, label: "10s" },
+  { value: 30, label: "30s" },
+  { value: 60, label: "1m" },
+  { value: 120, label: "2m" },
+  { value: 300, label: "5m" },
+  { value: 600, label: "10m" },
+  { value: 0, label: "\u221E" },
+];
 const MAX_LOG_ENTRIES = 500;
+
+function formatCountdown(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
 
 export default function AdminPage() {
   // ---- Busybox state ----
@@ -44,8 +59,12 @@ export default function AdminPage() {
   // ---- Simulator state ----
   const [running, setRunning] = useState(false);
   const [rps, setRps] = useState(2);
+  const [duration, setDuration] = useState(0); // 0 = infinite
+  const [remaining, setRemaining] = useState<number | null>(null); // seconds remaining, null when infinite
   const [log, setLog] = useState<RequestLogEntry[]>([]);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const startTimeRef = useRef<number>(0);
 
   // ---- Counters ----
   const total = log.length;
@@ -86,24 +105,54 @@ export default function AdminPage() {
     } catch { /* revert on failure */ }
   }, [busybox]);
 
-  // ---- Simulator start/stop ----
-  const startSimulator = useCallback(() => {
-    if (intervalRef.current) return;
-    setRunning(true);
-    const ms = Math.round(1000 / rps);
-    intervalRef.current = setInterval(async () => {
-      const entry = await fireOneRequest();
-      setLog((prev) => [entry, ...prev].slice(0, MAX_LOG_ENTRIES));
-    }, ms);
-  }, [rps]);
+  // ---- Clear countdown ----
+  const clearCountdown = useCallback(() => {
+    if (countdownRef.current) {
+      clearInterval(countdownRef.current);
+      countdownRef.current = null;
+    }
+    setRemaining(null);
+  }, []);
 
+  // ---- Simulator start/stop ----
   const stopSimulator = useCallback(() => {
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
+    clearCountdown();
     setRunning(false);
-  }, []);
+  }, [clearCountdown]);
+
+  const startSimulator = useCallback(() => {
+    if (intervalRef.current) return;
+    setRunning(true);
+
+    // Start request interval
+    const ms = Math.round(1000 / rps);
+    intervalRef.current = setInterval(async () => {
+      const entry = await fireOneRequest();
+      setLog((prev) => [entry, ...prev].slice(0, MAX_LOG_ENTRIES));
+    }, ms);
+
+    // Start countdown if duration is finite
+    if (duration > 0) {
+      startTimeRef.current = Date.now();
+      setRemaining(duration);
+
+      countdownRef.current = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - startTimeRef.current) / 1000);
+        const left = Math.max(duration - elapsed, 0);
+        setRemaining(left);
+        if (left <= 0) {
+          // Auto-stop when timer expires
+          stopSimulator();
+        }
+      }, 100);
+    } else {
+      setRemaining(null);
+    }
+  }, [rps, duration, stopSimulator]);
 
   // ---- Auto-disable on page unload ----
   useEffect(() => {
@@ -129,16 +178,20 @@ export default function AdminPage() {
     };
   }, [stopSimulator]);
 
-  // ---- Restart simulator when RPS changes while running ----
+  // ---- Restart simulator when RPS or duration changes while running ----
   useEffect(() => {
     if (running) {
       stopSimulator();
-      // Small delay then restart with new rate
       const t = setTimeout(() => startSimulator(), 50);
       return () => clearTimeout(t);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rps]);
+  }, [rps, duration]);
+
+  // ---- Progress calculation ----
+  const progress = duration > 0 && remaining !== null
+    ? Math.min(((duration - remaining) / duration) * 100, 100)
+    : 0;
 
   const statusColor = (status: number) => {
     if (status === 0) return "text-gray-400";
@@ -225,16 +278,31 @@ export default function AdminPage() {
         </div>
 
         {/* ========== Section 2: Traffic Simulator ========== */}
-        <div className="bg-[#1e1e1e] border border-[#2a2a2a] rounded-xl p-5">
+        <div className="bg-[#1e1e1e] border border-[#2a2a2a] rounded-xl p-5 relative overflow-hidden">
+          {/* Progress bar */}
+          {running && duration > 0 && (
+            <div className="absolute top-0 left-0 right-0 h-1 bg-[#2a2a2a]">
+              <div
+                className="h-full bg-green-500 transition-all duration-200 ease-linear"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+          )}
+
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold">Traffic Simulator</h2>
-            <div className={`px-3 py-1 rounded-full text-xs font-medium ${running ? "bg-green-600 text-white" : "bg-[#333] text-[#8a8a8a]"}`}>
-              {running ? "RUNNING" : "STOPPED"}
+            <div className="flex items-center gap-2">
+              {running && remaining !== null && remaining > 0 && (
+                <span className="text-sm font-mono text-green-400">{formatCountdown(remaining)}</span>
+              )}
+              <div className={`px-3 py-1 rounded-full text-xs font-medium ${running ? "bg-green-600 text-white" : "bg-[#333] text-[#8a8a8a]"}`}>
+                {running ? "RUNNING" : "STOPPED"}
+              </div>
             </div>
           </div>
 
           {/* Rate selector */}
-          <div className="mb-5">
+          <div className="mb-4">
             <div className="text-sm text-[#8a8a8a] mb-2">Requests per Second</div>
             <div className="flex gap-2">
               {RPS_OPTIONS.map((r) => (
@@ -246,6 +314,24 @@ export default function AdminPage() {
                   }`}
                 >
                   {r}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Duration selector */}
+          <div className="mb-5">
+            <div className="text-sm text-[#8a8a8a] mb-2">Duration</div>
+            <div className="flex gap-2">
+              {DURATION_OPTIONS.map((d) => (
+                <button
+                  key={d.value}
+                  onClick={() => setDuration(d.value)}
+                  className={`flex-1 py-2 text-sm font-mono rounded-lg transition-colors ${
+                    duration === d.value ? "bg-blue-600 text-white" : "bg-[#121212] text-[#8a8a8a] hover:bg-[#2a2a2a]"
+                  }`}
+                >
+                  {d.label}
                 </button>
               ))}
             </div>
