@@ -42,14 +42,219 @@ body {
   transition: color 0.3s ease;
 }
 
+/* ---- Micro-animation keyframes ---- */
+
+/* Fade in */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Fade in with upward slide */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Fade in with downward slide */
+@keyframes fadeInDown {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Scale in for modals / popups */
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Slide in from left */
+@keyframes slideInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Pulse glow for live indicators */
+@keyframes pulseGlow {
+  0%, 100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4);
+  }
+  50% {
+    opacity: 0.8;
+    box-shadow: 0 0 0 4px rgba(34, 197, 94, 0);
+  }
+}
+
+/* Subtle price flash for value changes */
+@keyframes priceFlashGreen {
+  0% { background-color: transparent; }
+  20% { background-color: rgba(34, 197, 94, 0.15); }
+  100% { background-color: transparent; }
+}
+
+@keyframes priceFlashRed {
+  0% { background-color: transparent; }
+  20% { background-color: rgba(239, 68, 68, 0.15); }
+  100% { background-color: transparent; }
+}
+
+/* Dynamic data highlight flash */
+@keyframes dataFlash {
+  0% { background-color: rgba(32, 129, 226, 0.15); }
+  100% { background-color: transparent; }
+}
+
+/* Crossfade for carousel */
+@keyframes crossfadeIn {
+  from {
+    opacity: 0;
+    transform: scale(1.02);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 /* Skeleton animation */
 @keyframes shimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
 }
 
+/* ---- Animation utility classes ---- */
+
+.animate-fadeIn {
+  animation: fadeIn 0.4s ease-out both;
+}
+
+.animate-fadeInUp {
+  animation: fadeInUp 0.4s ease-out both;
+}
+
+.animate-fadeInDown {
+  animation: fadeInDown 0.3s ease-out both;
+}
+
+.animate-scaleIn {
+  animation: scaleIn 0.25s ease-out both;
+}
+
+.animate-slideInLeft {
+  animation: slideInLeft 0.3s ease-out both;
+}
+
+.animate-pulseGlow {
+  animation: pulseGlow 2s ease-in-out infinite;
+}
+
+.animate-crossfadeIn {
+  animation: crossfadeIn 0.7s ease-out both;
+}
+
 .animate-shimmer {
   background: linear-gradient(90deg, #2a2a2a 25%, #333 50%, #2a2a2a 75%);
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
+}
+
+/* Staggered animation delays for list items */
+.stagger-1 { animation-delay: 0.03s; }
+.stagger-2 { animation-delay: 0.06s; }
+.stagger-3 { animation-delay: 0.09s; }
+.stagger-4 { animation-delay: 0.12s; }
+.stagger-5 { animation-delay: 0.15s; }
+.stagger-6 { animation-delay: 0.18s; }
+.stagger-7 { animation-delay: 0.21s; }
+.stagger-8 { animation-delay: 0.24s; }
+.stagger-9 { animation-delay: 0.27s; }
+.stagger-10 { animation-delay: 0.30s; }
+.stagger-11 { animation-delay: 0.33s; }
+.stagger-12 { animation-delay: 0.36s; }
+
+/* Dynamic data span styling -- subtle flash on mount */
+.dynamic-data {
+  animation: dataFlash 1s ease-out both;
+  border-radius: 2px;
+  display: inline;
+}
+
+/* Card hover micro-interactions */
+.card-hover {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+}
+
+/* Button press effect */
+.btn-press {
+  transition: transform 0.1s ease, background-color 0.15s ease;
+}
+.btn-press:active {
+  transform: scale(0.97);
+}
+
+/* Row hover with subtle left border reveal */
+.row-hover {
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+  border-left: 2px solid transparent;
+}
+.row-hover:hover {
+  border-left-color: #2081e2;
+  background-color: rgba(255, 255, 255, 0.02);
+}
+
+/* Image zoom on hover */
+.img-zoom {
+  transition: transform 0.35s ease;
+}
+.img-zoom:hover {
+  transform: scale(1.05);
+}
+
+/* Backdrop blur overlay */
+.backdrop-blur-overlay {
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+/* Price change flash */
+.price-flash-green {
+  animation: priceFlashGreen 1.2s ease-out;
+}
+.price-flash-red {
+  animation: priceFlashRed 1.2s ease-out;
+}
+
+/* Smooth number transition */
+.number-transition {
+  transition: color 0.3s ease;
+  font-variant-numeric: tabular-nums;
 }

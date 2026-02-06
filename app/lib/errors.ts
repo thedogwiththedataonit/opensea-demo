@@ -131,6 +131,29 @@ export class InternalError extends MarketplaceError {
 }
 
 // ---------------------------------------------------------------------------
+// 502 — Bad Gateway
+// ---------------------------------------------------------------------------
+
+/**
+ * Thrown when an upstream service returns an invalid response.
+ * Mimics Vercel's ROUTER_EXTERNAL_TARGET_ERROR — occurs when routing to an
+ * external target fails due to an erroneous response, timeout, or unreachable host.
+ *
+ * @see https://vercel.com/docs/errors/ROUTER_EXTERNAL_TARGET_ERROR
+ *
+ * Examples:
+ *  - External price oracle returns malformed data
+ *  - Upstream blockchain RPC node is unreachable
+ *  - Cross-service call receives an invalid HTTP response
+ */
+export class BadGatewayError extends MarketplaceError {
+  constructor(code: string = 'BAD_GATEWAY', message: string = 'Bad gateway: upstream service returned an invalid response.', context?: Record<string, unknown>) {
+    super(message, 502, code, context);
+    this.name = 'BadGatewayError';
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 503 — Service Unavailable
 // ---------------------------------------------------------------------------
 

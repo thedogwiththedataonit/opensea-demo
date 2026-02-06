@@ -29,7 +29,7 @@ export default function TopBar() {
         {/* Search */}
         <button
           onClick={() => setSearchOpen(true)}
-          className="flex items-center gap-2 bg-[#1e1e1e] border border-[#333] rounded-lg px-3 py-2 text-[#8a8a8a] hover:border-[#555] transition-colors w-[320px]"
+          className="flex items-center gap-2 bg-[#1e1e1e] border border-[#333] rounded-lg px-3 py-2 text-[#8a8a8a] hover:border-[#555] transition-all duration-200 w-[320px] btn-press"
           ref={inputRef as unknown as React.RefObject<HTMLButtonElement>}
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -45,7 +45,7 @@ export default function TopBar() {
         {/* Connect Wallet */}
         <Link
           href="#"
-          className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+          className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-all duration-200 btn-press"
         >
           Connect Wallet
         </Link>

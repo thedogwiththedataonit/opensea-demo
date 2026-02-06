@@ -22,6 +22,7 @@ import { tracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing
 import { handleRouteError } from "@/app/lib/error-handler";
 import { maybeFault } from "@/app/lib/busybox";
 import { ValidationError } from "@/app/lib/errors";
+import { enrichCollection } from "@/app/lib/faker-enrich";
 
 export const dynamic = "force-dynamic";
 
@@ -42,6 +43,7 @@ export async function GET(request: NextRequest) {
   }, async (rootSpan) => {
     try {
       maybeFault('http500', { route: '/api/collections' });
+      maybeFault('http502', { route: '/api/collections' });
       maybeFault('http503', { route: '/api/collections' });
       maybeFault('http429', { route: '/api/collections' });
 
@@ -89,9 +91,12 @@ export async function GET(request: NextRequest) {
         return page;
       });
 
+      // Enrich with faker fluctuations to simulate live db data
+      const enriched = paginated.map(enrichCollection);
+
       rootSpan.setAttribute(MA.PAGINATION_TOTAL, total);
-      rootSpan.setAttribute(MA.RESULT_COUNT, paginated.length);
-      return NextResponse.json({ data: paginated, total, limit, offset, hasMore });
+      rootSpan.setAttribute(MA.RESULT_COUNT, enriched.length);
+      return NextResponse.json({ data: enriched, total, limit, offset, hasMore });
     } catch (error) {
       return handleRouteError(error, rootSpan);
     }

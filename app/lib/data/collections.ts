@@ -1,29 +1,17 @@
 import { Collection, NFT, Activity } from "./types";
+import { faker } from "@faker-js/faker";
 
-// ---- Helper to generate placeholder SVG image URLs ----
-function collectionImage(name: string, hue: number): string {
-  return `data:image/svg+xml,${encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200">
-      <defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
-        <stop offset="0%" style="stop-color:hsl(${hue},70%,40%)"/>
-        <stop offset="100%" style="stop-color:hsl(${(hue + 60) % 360},70%,30%)"/>
-      </linearGradient></defs>
-      <rect width="200" height="200" fill="url(#g)"/>
-      <text x="100" y="110" text-anchor="middle" fill="white" font-size="18" font-family="sans-serif">${name.slice(0, 12)}</text>
-    </svg>`
-  )}`;
+// ---- Real image URLs via picsum.photos (deterministic, publicly accessible) ----
+function collectionImage(slug: string): string {
+  return `https://picsum.photos/seed/${slug}-col/200/200`;
 }
 
-function bannerImage(hue: number): string {
-  return `data:image/svg+xml,${encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400">
-      <defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
-        <stop offset="0%" style="stop-color:hsl(${hue},60%,25%)"/>
-        <stop offset="100%" style="stop-color:hsl(${(hue + 90) % 360},60%,35%)"/>
-      </linearGradient></defs>
-      <rect width="1200" height="400" fill="url(#g)"/>
-    </svg>`
-  )}`;
+function bannerImage(slug: string): string {
+  return `https://picsum.photos/seed/${slug}-banner/1200/400`;
+}
+
+function nftImage(collectionSlug: string, tokenId: string): string {
+  return `https://picsum.photos/seed/${collectionSlug}-${tokenId}/400/400`;
 }
 
 export const collections: Collection[] = [
@@ -31,8 +19,8 @@ export const collections: Collection[] = [
     slug: "cryptopunks",
     name: "CryptoPunks",
     description: "CryptoPunks launched as a fixed set of 10,000 items in mid-2017 and became one of the inspirations for the ERC-721 standard.",
-    imageUrl: collectionImage("CryptoPunks", 270),
-    bannerUrl: bannerImage(270),
+    imageUrl: collectionImage("cryptopunks"),
+    bannerUrl: bannerImage("cryptopunks"),
     floorPrice: 29.19,
     floorCurrency: "ETH",
     totalVolume: 1080000,
@@ -52,8 +40,8 @@ export const collections: Collection[] = [
     slug: "pudgy-penguins",
     name: "Pudgy Penguins",
     description: "Pudgy Penguins is a collection of 8,888 NFTs, waddling through Web3.",
-    imageUrl: collectionImage("Pudgy Penguins", 200),
-    bannerUrl: bannerImage(200),
+    imageUrl: collectionImage("pudgy-penguins"),
+    bannerUrl: bannerImage("pudgy-penguins"),
     floorPrice: 4.18,
     floorCurrency: "ETH",
     totalVolume: 245000,
@@ -73,8 +61,8 @@ export const collections: Collection[] = [
     slug: "hypurr",
     name: "Hypurr",
     description: "Hypurr is a collection of 5,555 unique digital cats living on HyperEVM.",
-    imageUrl: collectionImage("Hypurr", 30),
-    bannerUrl: bannerImage(30),
+    imageUrl: collectionImage("hypurr"),
+    bannerUrl: bannerImage("hypurr"),
     floorPrice: 469.0,
     floorCurrency: "HYPE",
     totalVolume: 820000,
@@ -94,8 +82,8 @@ export const collections: Collection[] = [
     slug: "bored-ape-yacht-club",
     name: "Bored Ape Yacht Club",
     description: "A collection of 10,000 unique Bored Ape NFTs living on the Ethereum blockchain.",
-    imageUrl: collectionImage("BAYC", 40),
-    bannerUrl: bannerImage(40),
+    imageUrl: collectionImage("bored-ape-yacht-club"),
+    bannerUrl: bannerImage("bored-ape-yacht-club"),
     floorPrice: 5.43,
     floorCurrency: "ETH",
     totalVolume: 890000,
@@ -115,8 +103,8 @@ export const collections: Collection[] = [
     slug: "moonbirds",
     name: "Moonbirds",
     description: "A collection of 10,000 utility-enabled PFPs that feature a richly diverse and unique collection of owls.",
-    imageUrl: collectionImage("Moonbirds", 180),
-    bannerUrl: bannerImage(180),
+    imageUrl: collectionImage("moonbirds"),
+    bannerUrl: bannerImage("moonbirds"),
     floorPrice: 1.21,
     floorCurrency: "ETH",
     totalVolume: 320000,
@@ -136,8 +124,8 @@ export const collections: Collection[] = [
     slug: "lil-pudgys",
     name: "Lil Pudgys",
     description: "Lil Pudgys are a collection of 22,222 randomly generated NFTs on the Ethereum blockchain.",
-    imageUrl: collectionImage("Lil Pudgys", 210),
-    bannerUrl: bannerImage(210),
+    imageUrl: collectionImage("lil-pudgys"),
+    bannerUrl: bannerImage("lil-pudgys"),
     floorPrice: 0.48,
     floorCurrency: "ETH",
     totalVolume: 98000,
@@ -157,8 +145,8 @@ export const collections: Collection[] = [
     slug: "mutant-ape-yacht-club",
     name: "Mutant Ape Yacht Club",
     description: "The MUTANT APE YACHT CLUB is a collection of up to 20,000 Mutant Apes.",
-    imageUrl: collectionImage("MAYC", 120),
-    bannerUrl: bannerImage(120),
+    imageUrl: collectionImage("mutant-ape-yacht-club"),
+    bannerUrl: bannerImage("mutant-ape-yacht-club"),
     floorPrice: 0.78,
     floorCurrency: "ETH",
     totalVolume: 560000,
@@ -178,8 +166,8 @@ export const collections: Collection[] = [
     slug: "milady-maker",
     name: "Milady Maker",
     description: "Milady Maker is a collection of 10,000 generative pfpNFTs in a neochibi aesthetic.",
-    imageUrl: collectionImage("Milady", 300),
-    bannerUrl: bannerImage(300),
+    imageUrl: collectionImage("milady-maker"),
+    bannerUrl: bannerImage("milady-maker"),
     floorPrice: 0.97,
     floorCurrency: "ETH",
     totalVolume: 142000,
@@ -199,8 +187,8 @@ export const collections: Collection[] = [
     slug: "axie-land",
     name: "Axie Land",
     description: "Axie Infinity land plots in the Lunacia metaverse.",
-    imageUrl: collectionImage("Axie Land", 60),
-    bannerUrl: bannerImage(60),
+    imageUrl: collectionImage("axie-land"),
+    bannerUrl: bannerImage("axie-land"),
     floorPrice: 1700.0,
     floorCurrency: "RON",
     totalVolume: 450000,
@@ -220,8 +208,8 @@ export const collections: Collection[] = [
     slug: "dx-terminal",
     name: "DX Terminal",
     description: "DX Terminal is a collection of 5,000 access passes to the DX ecosystem.",
-    imageUrl: collectionImage("DX Terminal", 0),
-    bannerUrl: bannerImage(0),
+    imageUrl: collectionImage("dx-terminal"),
+    bannerUrl: bannerImage("dx-terminal"),
     floorPrice: 0.01,
     floorCurrency: "ETH",
     totalVolume: 8200,
@@ -241,8 +229,8 @@ export const collections: Collection[] = [
     slug: "rektguy",
     name: "rektguy",
     description: "rektguy is a collection of 8,814 unique characters by OSF. No roadmap. No Discord. Just vibes.",
-    imageUrl: collectionImage("rektguy", 150),
-    bannerUrl: bannerImage(150),
+    imageUrl: collectionImage("rektguy"),
+    bannerUrl: bannerImage("rektguy"),
     floorPrice: 0.2144,
     floorCurrency: "ETH",
     totalVolume: 40400,
@@ -262,8 +250,8 @@ export const collections: Collection[] = [
     slug: "good-vibes-club",
     name: "Good Vibes Club",
     description: "Spreading good vibes across the blockchain, one NFT at a time.",
-    imageUrl: collectionImage("Good Vibes", 90),
-    bannerUrl: bannerImage(90),
+    imageUrl: collectionImage("good-vibes-club"),
+    bannerUrl: bannerImage("good-vibes-club"),
     floorPrice: 0.92,
     floorCurrency: "ETH",
     totalVolume: 15600,
@@ -283,41 +271,34 @@ export const collections: Collection[] = [
 
 // ---- NFT generation helpers ----
 
-const ethAddresses = [
-  "0x1a2b3c4d5e6f7890abcdef1234567890abcdef12",
-  "0xdeadbeef00000000000000000000000000000001",
-  "0xc0ffee254729296a45a3885639ac7e10f9d54979",
-  "0xbadc0de000000000000000000000000000000002",
-  "0xfeed0000000000000000000000000000000face3",
-  "0xace00000000000000000000000000000000ace04",
-  "0xbabe0000000000000000000000000000000babe5",
-  "0xdad00000000000000000000000000000000dad06",
-];
+function hashCode(str: string): number {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash |= 0;
+  }
+  return hash;
+}
 
-const ownerNames = [
-  "0xA1b2...c3D4",
-  "0x9f8E...7d6C",
-  "0x5a4B...3c2D",
-  "vitalik.eth",
-  "punk6529.eth",
-  "pranksy.eth",
-  "0xD1e2...f3A4",
-  "cobie.eth",
-];
+// Generate dynamic owner names and addresses using faker.js (seeded per entity)
+function generateOwnerName(seed: string): string {
+  const seededFaker = faker;
+  seededFaker.seed(Math.abs(hashCode(seed)));
+  const roll = seededFaker.number.int({ min: 0, max: 100 });
+  if (roll < 30) {
+    // ENS-style name
+    return `${seededFaker.internet.username().toLowerCase()}.eth`;
+  }
+  // Truncated wallet address
+  const addr = seededFaker.finance.ethereumAddress();
+  return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+}
 
-function nftImage(collectionName: string, tokenId: string, hue: number): string {
-  const h2 = (hue + parseInt(tokenId) * 37) % 360;
-  return `data:image/svg+xml,${encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400">
-      <defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
-        <stop offset="0%" style="stop-color:hsl(${h2},65%,35%)"/>
-        <stop offset="100%" style="stop-color:hsl(${(h2 + 80) % 360},65%,25%)"/>
-      </linearGradient></defs>
-      <rect width="400" height="400" fill="url(#g)"/>
-      <text x="200" y="180" text-anchor="middle" fill="rgba(255,255,255,0.3)" font-size="60" font-family="monospace">#${tokenId}</text>
-      <text x="200" y="250" text-anchor="middle" fill="rgba(255,255,255,0.5)" font-size="16" font-family="sans-serif">${collectionName}</text>
-    </svg>`
-  )}`;
+function generateEthAddress(seed: string): string {
+  const seededFaker = faker;
+  seededFaker.seed(Math.abs(hashCode(seed)));
+  return seededFaker.finance.ethereumAddress();
 }
 
 const traitTypes = ["Background", "Body", "Eyes", "Mouth", "Headwear", "Clothing", "Accessory"];
@@ -336,35 +317,32 @@ function generateActivity(tokenId: string, collectionSlug: string): Activity[] {
   const events: Activity[] = [];
   const numEvents = 3 + Math.floor(Math.abs(hashCode(collectionSlug + tokenId)) % 6);
 
+  // Use faker with a seed for this specific NFT's activity
+  faker.seed(Math.abs(hashCode(collectionSlug + tokenId + "activity")));
+
   for (let i = 0; i < numEvents; i++) {
     const types: Activity["eventType"][] = ["sale", "transfer", "list", "offer", "mint"];
     const eventType = types[Math.abs(hashCode(collectionSlug + tokenId + i)) % types.length];
+    const fromName = generateOwnerName(collectionSlug + tokenId + i + "from");
+    const toName = generateOwnerName(collectionSlug + tokenId + i + "to");
+    const daysAgo = faker.number.int({ min: 1, max: 90 });
+    const price = eventType === "transfer" ? null : faker.number.float({ min: 0.01, max: 15, fractionDigits: 4 });
+
     events.push({
       id: `${collectionSlug}-${tokenId}-${i}`,
       eventType,
-      price: eventType === "transfer" ? null : 0.1 + Math.abs(hashCode(collectionSlug + tokenId + i + "p")) % 100 / 10,
+      price,
       currency: "ETH",
-      fromAddress: ownerNames[Math.abs(hashCode(collectionSlug + tokenId + i + "f")) % ownerNames.length],
-      toAddress: ownerNames[Math.abs(hashCode(collectionSlug + tokenId + i + "t")) % ownerNames.length],
-      timestamp: now - (i + 1) * 86400000 * (1 + (Math.abs(hashCode(collectionSlug + tokenId + i + "d")) % 30)),
+      fromAddress: fromName,
+      toAddress: toName,
+      timestamp: now - daysAgo * 86400000,
     });
   }
   return events.sort((a, b) => b.timestamp - a.timestamp);
 }
 
-function hashCode(str: string): number {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash |= 0;
-  }
-  return hash;
-}
-
 function generateNFTs(collection: Collection, count: number): NFT[] {
   const nfts: NFT[] = [];
-  const hue = Math.abs(hashCode(collection.slug)) % 360;
 
   for (let i = 0; i < count; i++) {
     const tokenId = String(1000 + i * 137 + Math.abs(hashCode(collection.slug + i)) % 100);
@@ -386,8 +364,8 @@ function generateNFTs(collection: Collection, count: number): NFT[] {
       collectionSlug: collection.slug,
       name: `${collection.name} #${tokenId}`,
       description: `A unique item from the ${collection.name} collection.`,
-      imageUrl: nftImage(collection.name, tokenId, hue),
-      owner: ownerNames[Math.abs(hashCode(collection.slug + tokenId + "owner")) % ownerNames.length],
+      imageUrl: nftImage(collection.slug, tokenId),
+      owner: generateOwnerName(collection.slug + tokenId + "owner"),
       lastSalePrice: collection.floorPrice * (0.5 + Math.abs(hashCode(collection.slug + tokenId + "last")) % 300 / 100),
       lastSaleCurrency: collection.floorCurrency,
       currentPrice,
@@ -397,7 +375,7 @@ function generateNFTs(collection: Collection, count: number): NFT[] {
       properties,
       activityHistory: generateActivity(tokenId, collection.slug),
       chain: collection.chain,
-      contractAddress: ethAddresses[Math.abs(hashCode(collection.slug)) % ethAddresses.length],
+      contractAddress: generateEthAddress(collection.slug + "contract"),
       tokenStandard: "ERC-721",
     });
   }

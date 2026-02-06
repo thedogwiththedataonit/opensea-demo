@@ -28,6 +28,7 @@ export async function GET(
   return withSpan(tracer, 'marketplace.collection.detail', { [MA.COLLECTION_SLUG]: slug }, async (rootSpan) => {
     try {
       maybeFault('http500', { route: '/api/collections/[slug]', slug });
+      maybeFault('http502', { route: '/api/collections/[slug]' });
       maybeFault('http503', { route: '/api/collections/[slug]' });
       maybeFault('http429', { route: '/api/collections/[slug]' });
 

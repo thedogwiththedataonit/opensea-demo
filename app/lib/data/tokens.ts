@@ -1,16 +1,8 @@
 import { Token, PricePoint } from "./types";
 
-function tokenImage(symbol: string, hue: number): string {
-  return `data:image/svg+xml,${encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80">
-      <defs><radialGradient id="g" cx="50%" cy="50%" r="50%">
-        <stop offset="0%" style="stop-color:hsl(${hue},70%,55%)"/>
-        <stop offset="100%" style="stop-color:hsl(${hue},70%,30%)"/>
-      </radialGradient></defs>
-      <circle cx="40" cy="40" r="40" fill="url(#g)"/>
-      <text x="40" y="46" text-anchor="middle" fill="white" font-size="16" font-weight="bold" font-family="sans-serif">${symbol.slice(0, 5)}</text>
-    </svg>`
-  )}`;
+// Use deterministic, publicly-accessible avatar images for tokens
+function tokenImage(symbol: string): string {
+  return `https://api.dicebear.com/7.x/shapes/svg?seed=${encodeURIComponent(symbol)}&size=80`;
 }
 
 function generatePriceHistory(basePrice: number, points: number, volatility: number): PricePoint[] {
@@ -39,7 +31,7 @@ export const tokens: Token[] = [
     chain: "ethereum",
     name: "BFS",
     symbol: "BFS",
-    imageUrl: tokenImage("BFS", 30),
+    imageUrl: tokenImage("BFS"),
     price: 0.1177,
     fdv: 117700000,
     volume1d: 20400000,
@@ -63,7 +55,7 @@ export const tokens: Token[] = [
     chain: "ethereum",
     name: "Arbitrum",
     symbol: "ARB",
-    imageUrl: tokenImage("ARB", 210),
+    imageUrl: tokenImage("ARB"),
     price: 0.11,
     fdv: 1100000000,
     volume1d: 19700000,
@@ -85,7 +77,7 @@ export const tokens: Token[] = [
     chain: "solana",
     name: "Desperate Dad's Army",
     symbol: "FTHR",
-    imageUrl: tokenImage("FTHR", 45),
+    imageUrl: tokenImage("FTHR"),
     price: 0.001339,
     fdv: 1300000,
     volume1d: 5000000,
@@ -112,7 +104,7 @@ export const tokens: Token[] = [
     chain: "ethereum",
     name: "AI Rig Complex",
     symbol: "arc",
-    imageUrl: tokenImage("arc", 260),
+    imageUrl: tokenImage("arc"),
     price: 0.07182,
     fdv: 71800000,
     volume1d: 10500000,
@@ -134,7 +126,7 @@ export const tokens: Token[] = [
     chain: "solana",
     name: "hedge",
     symbol: "hedge",
-    imageUrl: tokenImage("hedge", 160),
+    imageUrl: tokenImage("hedge"),
     price: 0.00104,
     fdv: 1000000,
     volume1d: 3300000,
@@ -159,7 +151,7 @@ export const tokens: Token[] = [
     chain: "ethereum",
     name: "Rainbow",
     symbol: "RNBW",
-    imageUrl: tokenImage("RNBW", 0),
+    imageUrl: tokenImage("RNBW"),
     price: 0.03886,
     fdv: 38900000,
     volume1d: 2700000,
@@ -183,7 +175,7 @@ export const tokens: Token[] = [
     chain: "solana",
     name: "Pippin",
     symbol: "pippin",
-    imageUrl: tokenImage("pippin", 130),
+    imageUrl: tokenImage("pippin"),
     price: 0.1624,
     fdv: 162400000,
     volume1d: 7500000,
@@ -205,7 +197,7 @@ export const tokens: Token[] = [
     chain: "solana",
     name: "Nietzschean Penguin",
     symbol: "PENGUIN",
-    imageUrl: tokenImage("PENGUIN", 195),
+    imageUrl: tokenImage("PENGUIN"),
     price: 0.01707,
     fdv: 17100000,
     volume1d: 8200000,
@@ -229,7 +221,7 @@ export const tokens: Token[] = [
     chain: "solana",
     name: "ZEUS",
     symbol: "ZEUS",
-    imageUrl: tokenImage("ZEUS", 50),
+    imageUrl: tokenImage("ZEUS"),
     price: 0.0177,
     fdv: 17700000,
     volume1d: 380200,
@@ -251,7 +243,7 @@ export const tokens: Token[] = [
     chain: "solana",
     name: "TrumpRX",
     symbol: "TrumpRX",
-    imageUrl: tokenImage("TrumpRX", 10),
+    imageUrl: tokenImage("TrumpRX"),
     price: 0.00054,
     fdv: 538200,
     volume1d: 1700000,
@@ -277,7 +269,7 @@ export const tokens: Token[] = [
     chain: "ethereum",
     name: "Seeker",
     symbol: "SKR",
-    imageUrl: tokenImage("SKR", 280),
+    imageUrl: tokenImage("SKR"),
     price: 0.02426,
     fdv: 242600000,
     volume1d: 1700000,
@@ -299,7 +291,7 @@ export const tokens: Token[] = [
     chain: "ethereum",
     name: "The Crypto Dog",
     symbol: "DOG",
-    imageUrl: tokenImage("DOG", 35),
+    imageUrl: tokenImage("DOG"),
     price: 0.00058,
     fdv: 584800,
     volume1d: 1800000,
@@ -325,7 +317,7 @@ export const tokens: Token[] = [
     chain: "ethereum",
     name: "U.S Oil",
     symbol: "USOR",
-    imageUrl: tokenImage("USOR", 100),
+    imageUrl: tokenImage("USOR"),
     price: 0.00835,
     fdv: 8300000,
     volume1d: 1500000,
@@ -349,7 +341,7 @@ export const tokens: Token[] = [
     chain: "ethereum",
     name: "Circle xStock",
     symbol: "CRCLx",
-    imageUrl: tokenImage("CRCLx", 240),
+    imageUrl: tokenImage("CRCLx"),
     price: 0.01672,
     fdv: 16700000,
     volume1d: 582600,
@@ -373,7 +365,7 @@ export const tokens: Token[] = [
     chain: "solana",
     name: "Wrapped SOL",
     symbol: "SOL",
-    imageUrl: tokenImage("SOL", 270),
+    imageUrl: tokenImage("SOL"),
     price: 195.42,
     fdv: 95000000000,
     volume1d: 1200000000,

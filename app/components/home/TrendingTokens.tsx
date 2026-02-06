@@ -38,24 +38,26 @@ export default function TrendingTokens({ tokens }: TrendingTokensProps) {
   if (!tokens?.length) return null;
 
   return (
-    <div>
+    <div className="animate-fadeIn">
       <h3 className="text-xl font-bold mb-1">Trending Tokens</h3>
       <p className="text-sm text-[#8a8a8a] mb-4">Tokens with momentum today</p>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        {tokens.map((token) => (
+        {tokens.map((token, index) => (
           <Link
             key={`${token.chain}-${token.address}`}
             href={`/token/${token.chain}/${token.address}`}
-            className="bg-[#1e1e1e] rounded-xl p-4 hover:bg-[#252525] transition-colors flex items-center gap-3"
+            className={`bg-[#1e1e1e] rounded-xl p-4 hover:bg-[#252525] transition-all duration-200 flex items-center gap-3 card-hover animate-fadeInUp stagger-${Math.min(index + 1, 12)}`}
           >
-            <img src={token.imageUrl} alt={token.symbol} className="w-10 h-10 rounded-full flex-shrink-0" />
+            <div className="w-10 h-10 rounded-full flex-shrink-0 overflow-hidden">
+              <img src={token.imageUrl} alt={token.symbol} className="w-full h-full object-cover" />
+            </div>
             <div className="flex-1 min-w-0">
               <div className="text-sm font-medium text-white truncate">{token.name}</div>
               <div className="flex items-center gap-2">
-                <span className="text-sm text-[#8a8a8a]">{formatCompact(token.fdv)}</span>
-                <span className={`text-sm ${token.change1d >= 0 ? "text-green-400" : "text-red-400"}`}>
-                  {token.change1d >= 0 ? "+" : ""}{token.change1d.toFixed(1)}%
+                <span className="text-sm text-[#8a8a8a] number-transition"><span className="dynamic-data">{formatCompact(token.fdv)}</span></span>
+                <span className={`text-sm number-transition ${token.change1d >= 0 ? "text-green-400" : "text-red-400"}`}>
+                  <span className="dynamic-data">{token.change1d >= 0 ? "+" : ""}{token.change1d.toFixed(1)}%</span>
                 </span>
               </div>
             </div>
@@ -64,6 +66,8 @@ export default function TrendingTokens({ tokens }: TrendingTokensProps) {
               width={60}
               height={28}
               color={token.change1d >= 0 ? "#22c55e" : "#ef4444"}
+              realtime
+              realtimeIntervalMs={3000}
             />
           </Link>
         ))}

@@ -84,20 +84,20 @@ export default function TokensPage() {
   };
 
   return (
-    <div className="flex">
+    <div className="flex animate-fadeIn">
       {/* Filter sidebar */}
       {showFilters && (
-        <div className="w-[260px] border-r border-[#2a2a2a] p-4 flex-shrink-0">
+        <div className="w-[260px] border-r border-[#2a2a2a] p-4 flex-shrink-0 animate-slideInLeft">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-sm font-semibold">Filter By</h3>
-            <button onClick={() => setShowFilters(false)} className="text-[#8a8a8a] hover:text-white">
+            <button onClick={() => setShowFilters(false)} className="text-[#8a8a8a] hover:text-white transition-colors">
               ≪
             </button>
           </div>
 
           {/* Collections / Tokens toggle */}
           <div className="flex items-center gap-1 mb-4">
-            <Link href="/collections" className="text-xs text-[#8a8a8a] hover:text-white px-3 py-1.5 rounded-lg hover:bg-[#1e1e1e]">
+            <Link href="/collections" className="text-xs text-[#8a8a8a] hover:text-white px-3 py-1.5 rounded-lg hover:bg-[#1e1e1e] transition-colors">
               🖼️ Collections
             </Link>
             <button className="text-xs bg-[#2a2a2a] text-white px-3 py-1.5 rounded-lg">◎ Tokens</button>
@@ -111,14 +111,14 @@ export default function TokensPage() {
             <input
               type="text"
               placeholder="Search for chains"
-              className="w-full bg-[#1e1e1e] border border-[#333] rounded-lg px-3 py-2 text-xs text-white placeholder-[#666] outline-none mb-2"
+              className="w-full bg-[#1e1e1e] border border-[#333] rounded-lg px-3 py-2 text-xs text-white placeholder-[#666] outline-none mb-2 focus:border-[#555] transition-colors"
             />
             <div className="flex flex-wrap gap-1.5">
               {CHAINS.map((chain) => (
                 <button
                   key={chain.id}
                   onClick={() => setActiveChain(chain.id)}
-                  className={`px-3 py-1.5 rounded-full text-xs transition-colors ${
+                  className={`px-3 py-1.5 rounded-full text-xs transition-all duration-200 btn-press ${
                     activeChain === chain.id
                       ? "bg-white text-black"
                       : "bg-[#1e1e1e] text-[#8a8a8a] hover:bg-[#2a2a2a]"
@@ -139,7 +139,7 @@ export default function TokensPage() {
               {FDV_FILTERS.map((f) => (
                 <button
                   key={f.label}
-                  className="px-3 py-1.5 rounded-full text-xs bg-[#1e1e1e] text-[#8a8a8a] hover:bg-[#2a2a2a] transition-colors"
+                  className="px-3 py-1.5 rounded-full text-xs bg-[#1e1e1e] text-[#8a8a8a] hover:bg-[#2a2a2a] transition-all duration-200 btn-press"
                 >
                   {f.label}
                 </button>
@@ -154,7 +154,7 @@ export default function TokensPage() {
         {!showFilters && (
           <button
             onClick={() => setShowFilters(true)}
-            className="text-[#8a8a8a] hover:text-white text-sm mb-4 flex items-center gap-1"
+            className="text-[#8a8a8a] hover:text-white text-sm mb-4 flex items-center gap-1 transition-colors"
           >
             ≫ Filters
           </button>
@@ -166,7 +166,7 @@ export default function TokensPage() {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 btn-press ${
                 activeTab === tab.id
                   ? "bg-[#2a2a2a] text-white"
                   : "text-[#8a8a8a] hover:text-white"
@@ -187,36 +187,38 @@ export default function TokensPage() {
                 <tr className="text-xs text-[#8a8a8a] uppercase tracking-wider border-b border-[#2a2a2a]">
                   <th className="text-left py-3 px-4 font-medium w-8">☆</th>
                   <th className="text-left py-3 px-4 font-medium">Token</th>
-                  <th className="text-right py-3 px-4 font-medium cursor-pointer hover:text-white" onClick={() => handleSort("price")}>
+                  <th className="text-right py-3 px-4 font-medium cursor-pointer hover:text-white transition-colors" onClick={() => handleSort("price")}>
                     Price {sortIndicator("price")}
                   </th>
-                  <th className="text-right py-3 px-4 font-medium cursor-pointer hover:text-white" onClick={() => handleSort("change1h")}>
+                  <th className="text-right py-3 px-4 font-medium cursor-pointer hover:text-white transition-colors" onClick={() => handleSort("change1h")}>
                     1H Change {sortIndicator("change1h")}
                   </th>
-                  <th className="text-right py-3 px-4 font-medium cursor-pointer hover:text-white" onClick={() => handleSort("change1d")}>
+                  <th className="text-right py-3 px-4 font-medium cursor-pointer hover:text-white transition-colors" onClick={() => handleSort("change1d")}>
                     1D Change {sortIndicator("change1d")}
                   </th>
-                  <th className="text-right py-3 px-4 font-medium cursor-pointer hover:text-white" onClick={() => handleSort("change30d")}>
+                  <th className="text-right py-3 px-4 font-medium cursor-pointer hover:text-white transition-colors" onClick={() => handleSort("change30d")}>
                     30D Change {sortIndicator("change30d")}
                   </th>
-                  <th className="text-right py-3 px-4 font-medium cursor-pointer hover:text-white" onClick={() => handleSort("volume1d")}>
+                  <th className="text-right py-3 px-4 font-medium cursor-pointer hover:text-white transition-colors" onClick={() => handleSort("volume1d")}>
                     1D Vol {sortIndicator("volume1d")}
                   </th>
-                  <th className="text-right py-3 px-4 font-medium cursor-pointer hover:text-white" onClick={() => handleSort("fdv")}>
+                  <th className="text-right py-3 px-4 font-medium cursor-pointer hover:text-white transition-colors" onClick={() => handleSort("fdv")}>
                     FDV {sortIndicator("fdv")}
                   </th>
                   <th className="text-right py-3 px-4 font-medium w-[120px]">Last 1D</th>
                 </tr>
               </thead>
               <tbody>
-                {data?.data.map((token) => (
-                  <tr key={`${token.chain}-${token.address}`} className="border-b border-[#1e1e1e] hover:bg-[#1a1a1a] transition-colors">
+                {data?.data.map((token, index) => (
+                  <tr key={`${token.chain}-${token.address}`} className={`border-b border-[#1e1e1e] hover:bg-[#1a1a1a] transition-all duration-150 row-hover animate-fadeInUp stagger-${Math.min(index + 1, 12)}`}>
                     <td className="py-3 px-4">
-                      <button className="text-[#666] hover:text-yellow-400">☆</button>
+                      <button className="text-[#666] hover:text-yellow-400 transition-colors">☆</button>
                     </td>
                     <td className="py-3 px-4">
                       <Link href={`/token/${token.chain}/${token.address}`} className="flex items-center gap-3">
-                        <img src={token.imageUrl} alt={token.symbol} className="w-8 h-8 rounded-full" />
+                        <div className="w-8 h-8 rounded-full overflow-hidden flex-shrink-0">
+                          <img src={token.imageUrl} alt={token.symbol} className="w-full h-full object-cover" />
+                        </div>
                         <div>
                           <div className="text-sm text-white flex items-center gap-1">
                             {token.name}
@@ -226,20 +228,20 @@ export default function TokensPage() {
                         </div>
                       </Link>
                     </td>
-                    <td className="text-right py-3 px-4 text-sm font-mono">{formatPrice(token.price)}</td>
-                    <td className={`text-right py-3 px-4 text-sm ${token.change1h >= 0 ? "text-green-400" : "text-red-400"}`}>
-                      {token.change1h >= 0 ? "+" : ""}{token.change1h.toFixed(1)}%
+                    <td className="text-right py-3 px-4 text-sm font-mono number-transition"><span className="dynamic-data">{formatPrice(token.price)}</span></td>
+                    <td className={`text-right py-3 px-4 text-sm number-transition ${token.change1h >= 0 ? "text-green-400" : "text-red-400"}`}>
+                      <span className="dynamic-data">{token.change1h >= 0 ? "+" : ""}{token.change1h.toFixed(1)}%</span>
                     </td>
-                    <td className={`text-right py-3 px-4 text-sm ${token.change1d >= 0 ? "text-green-400" : "text-red-400"}`}>
-                      {token.change1d >= 0 ? "+" : ""}{token.change1d.toFixed(1)}%
+                    <td className={`text-right py-3 px-4 text-sm number-transition ${token.change1d >= 0 ? "text-green-400" : "text-red-400"}`}>
+                      <span className="dynamic-data">{token.change1d >= 0 ? "+" : ""}{token.change1d.toFixed(1)}%</span>
                     </td>
-                    <td className={`text-right py-3 px-4 text-sm ${token.change30d >= 0 ? "text-green-400" : "text-red-400"}`}>
-                      {token.change30d >= 0 ? "+" : ""}{token.change30d.toFixed(1)}%
+                    <td className={`text-right py-3 px-4 text-sm number-transition ${token.change30d >= 0 ? "text-green-400" : "text-red-400"}`}>
+                      <span className="dynamic-data">{token.change30d >= 0 ? "+" : ""}{token.change30d.toFixed(1)}%</span>
                     </td>
-                    <td className="text-right py-3 px-4 text-sm font-mono">{formatCompact(token.volume1d)}</td>
-                    <td className="text-right py-3 px-4 text-sm font-mono">{formatCompact(token.fdv)}</td>
+                    <td className="text-right py-3 px-4 text-sm font-mono number-transition"><span className="dynamic-data">{formatCompact(token.volume1d)}</span></td>
+                    <td className="text-right py-3 px-4 text-sm font-mono number-transition"><span className="dynamic-data">{formatCompact(token.fdv)}</span></td>
                     <td className="text-right py-3 px-4">
-                      <Sparkline data={token.sparkline} width={100} height={32} />
+                      <Sparkline data={token.sparkline} width={100} height={32} realtime realtimeIntervalMs={2500} />
                     </td>
                   </tr>
                 ))}

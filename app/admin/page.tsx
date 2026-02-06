@@ -5,6 +5,7 @@ import { fireOneRequest, RequestLogEntry } from "./simulator";
 
 interface BusyboxFaults {
   http500: boolean;
+  http502: boolean;
   http503: boolean;
   http429: boolean;
   http422: boolean;
@@ -20,6 +21,7 @@ interface BusyboxState {
 
 const FAULT_LABELS: Record<keyof BusyboxFaults, { label: string; desc: string }> = {
   http500: { label: "500 Internal Error", desc: "Random server crashes on any route" },
+  http502: { label: "502 Bad Gateway", desc: "Upstream target failure (Vercel ROUTER_EXTERNAL_TARGET_ERROR)" },
   http503: { label: "503 Unavailable", desc: "Simulated downstream outages" },
   http429: { label: "429 Rate Limit", desc: "Simulated request throttling" },
   http422: { label: "422 Unprocessable", desc: "Business logic failures (swap)" },
@@ -35,7 +37,7 @@ export default function AdminPage() {
   const [busybox, setBusybox] = useState<BusyboxState>({
     enabled: false,
     errorRate: 0.3,
-    enabledFaults: { http500: true, http503: true, http429: true, http422: true, subfunctionCrash: true, timeout: true },
+    enabledFaults: { http500: true, http502: true, http503: true, http429: true, http422: true, subfunctionCrash: true, timeout: true },
   });
   const [busyboxLoading, setBusyboxLoading] = useState(true);
 

@@ -26,12 +26,12 @@ export default function CollectionDetailPage() {
   );
 
   return (
-    <div>
+    <div className="animate-fadeIn">
       {/* Banner */}
-      <div className="relative h-[200px] bg-[#1e1e1e]">
+      <div className="relative h-[200px] bg-[#1e1e1e] overflow-hidden">
         {collection && (
           <div
-            className="absolute inset-0 bg-cover bg-center"
+            className="absolute inset-0 bg-cover bg-center animate-crossfadeIn"
             style={{ backgroundImage: `url(${collection.bannerUrl})` }}
           >
             <div className="absolute inset-0 bg-black/30" />
@@ -43,15 +43,17 @@ export default function CollectionDetailPage() {
       <div className="px-6 -mt-12 relative">
         <div className="flex items-end gap-4 mb-4">
           {collection ? (
-            <img
-              src={collection.imageUrl}
-              alt={collection.name}
-              className="w-24 h-24 rounded-2xl border-4 border-[#121212]"
-            />
+            <div className="w-24 h-24 rounded-2xl border-4 border-[#121212] overflow-hidden animate-scaleIn">
+              <img
+                src={collection.imageUrl}
+                alt={collection.name}
+                className="w-full h-full object-cover"
+              />
+            </div>
           ) : (
             <div className="w-24 h-24 rounded-2xl bg-[#2a2a2a] animate-pulse border-4 border-[#121212]" />
           )}
-          <div className="pb-2">
+          <div className="pb-2 animate-fadeInUp">
             {collection ? (
               <>
                 <h1 className="text-2xl font-bold flex items-center gap-2">
@@ -59,7 +61,7 @@ export default function CollectionDetailPage() {
                   {collection.verified && <VerifiedBadge size={20} />}
                 </h1>
                 <p className="text-sm text-[#8a8a8a]">
-                  By <span className="text-white">{collection.creatorName}</span>
+                  By <span className="text-white dynamic-data">{collection.creatorName}</span>
                   <span className="mx-2">·</span>
                   <ChainBadge chain={collection.chain} />
                 </p>
@@ -75,15 +77,15 @@ export default function CollectionDetailPage() {
 
         {/* Description */}
         {collection && (
-          <p className="text-sm text-[#8a8a8a] max-w-2xl mb-4">{collection.description}</p>
+          <p className="text-sm text-[#8a8a8a] max-w-2xl mb-4 animate-fadeInUp">{collection.description}</p>
         )}
 
         {/* Stats */}
         {collection && (
-          <div className="flex items-center gap-6 mb-6 border border-[#2a2a2a] rounded-xl p-4 w-fit">
+          <div className="flex items-center gap-6 mb-6 border border-[#2a2a2a] rounded-xl p-4 w-fit animate-fadeInUp">
             <div>
               <div className="text-xs text-[#8a8a8a] uppercase tracking-wider">Floor Price</div>
-              <div className="text-sm font-mono font-semibold">{collection.floorPrice.toFixed(4)} {collection.floorCurrency}</div>
+              <div className="text-sm font-mono font-semibold number-transition"><span className="dynamic-data">{collection.floorPrice.toFixed(4)}</span> {collection.floorCurrency}</div>
             </div>
             <div className="w-px h-8 bg-[#2a2a2a]" />
             <div>
@@ -93,17 +95,17 @@ export default function CollectionDetailPage() {
             <div className="w-px h-8 bg-[#2a2a2a]" />
             <div>
               <div className="text-xs text-[#8a8a8a] uppercase tracking-wider">Total Volume</div>
-              <div className="text-sm font-mono font-semibold">{(collection.totalVolume / 1000).toFixed(1)}K {collection.totalVolumeCurrency}</div>
+              <div className="text-sm font-mono font-semibold"><span className="dynamic-data">{(collection.totalVolume / 1000).toFixed(1)}K</span> {collection.totalVolumeCurrency}</div>
             </div>
             <div className="w-px h-8 bg-[#2a2a2a]" />
             <div>
               <div className="text-xs text-[#8a8a8a] uppercase tracking-wider">Listed</div>
-              <div className="text-sm font-mono font-semibold">{collection.listedPct}%</div>
+              <div className="text-sm font-mono font-semibold"><span className="dynamic-data">{collection.listedPct}%</span></div>
             </div>
             <div className="w-px h-8 bg-[#2a2a2a]" />
             <div>
               <div className="text-xs text-[#8a8a8a] uppercase tracking-wider">Owners</div>
-              <div className="text-sm font-mono font-semibold">{collection.ownerCount.toLocaleString()}</div>
+              <div className="text-sm font-mono font-semibold"><span className="dynamic-data">{collection.ownerCount.toLocaleString()}</span></div>
             </div>
           </div>
         )}
@@ -113,7 +115,7 @@ export default function CollectionDetailPage() {
           <select
             value={status}
             onChange={(e) => setStatus(e.target.value)}
-            className="bg-[#1e1e1e] border border-[#333] rounded-lg px-3 py-2 text-sm text-white outline-none"
+            className="bg-[#1e1e1e] border border-[#333] rounded-lg px-3 py-2 text-sm text-white outline-none transition-colors hover:border-[#555]"
           >
             <option value="all">All Items</option>
             <option value="listed">Listed Only</option>
@@ -121,7 +123,7 @@ export default function CollectionDetailPage() {
           <select
             value={sort}
             onChange={(e) => setSort(e.target.value)}
-            className="bg-[#1e1e1e] border border-[#333] rounded-lg px-3 py-2 text-sm text-white outline-none"
+            className="bg-[#1e1e1e] border border-[#333] rounded-lg px-3 py-2 text-sm text-white outline-none transition-colors hover:border-[#555]"
           >
             <option value="price">Price: High to Low</option>
             <option value="rarity">Rarity: Rare First</option>
@@ -137,11 +139,11 @@ export default function CollectionDetailPage() {
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 pb-8">
           {loadingItems
             ? Array.from({ length: 8 }).map((_, i) => <SkeletonCard key={i} />)
-            : itemsData?.data.map((nft) => (
+            : itemsData?.data.map((nft, index) => (
                 <Link
                   key={nft.tokenId}
                   href={`/nft/${slug}/${nft.tokenId}`}
-                  className="bg-[#1e1e1e] rounded-xl overflow-hidden hover:ring-1 hover:ring-[#555] transition-all group"
+                  className={`bg-[#1e1e1e] rounded-xl overflow-hidden hover:ring-1 hover:ring-[#555] transition-all duration-200 group card-hover animate-fadeInUp stagger-${Math.min(index + 1, 12)}`}
                 >
                   <div className="aspect-square overflow-hidden">
                     <img
@@ -157,9 +159,9 @@ export default function CollectionDetailPage() {
                       <div className="flex items-center justify-between">
                         <div>
                           <div className="text-xs text-[#8a8a8a]">Price</div>
-                          <div className="text-sm font-mono">{nft.currentPrice.toFixed(4)} {nft.currentCurrency}</div>
+                          <div className="text-sm font-mono number-transition"><span className="dynamic-data">{nft.currentPrice.toFixed(4)}</span> {nft.currentCurrency}</div>
                         </div>
-                        <button className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1.5 rounded-lg transition-colors">
+                        <button className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1.5 rounded-lg transition-colors btn-press">
                           Buy
                         </button>
                       </div>

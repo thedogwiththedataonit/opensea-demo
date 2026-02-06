@@ -40,6 +40,7 @@ export async function POST(
   return withSpan(tracer, 'marketplace.swap.quote', { [MA.CHAIN]: chain, [MA.TOKEN_ADDRESS]: address }, async (rootSpan) => {
     try {
       maybeFault('http500', { route: '/api/tokens/[chain]/[address]/swap', chain, address });
+      maybeFault('http502', { route: '/api/tokens/[chain]/[address]/swap' });
       maybeFault('http503', { route: '/api/tokens/[chain]/[address]/swap' });
       maybeFault('http429', { route: '/api/tokens/[chain]/[address]/swap' });
 

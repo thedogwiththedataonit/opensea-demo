@@ -36,6 +36,7 @@ export async function GET(
   }, async (rootSpan) => {
     try {
       maybeFault('http500', { route: '/api/tokens/[chain]/[address]/chart', chain, address });
+      maybeFault('http502', { route: '/api/tokens/[chain]/[address]/chart' });
       maybeFault('http503', { route: '/api/tokens/[chain]/[address]/chart' });
       maybeFault('http429', { route: '/api/tokens/[chain]/[address]/chart' });
 

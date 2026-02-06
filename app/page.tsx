@@ -35,11 +35,11 @@ export default function Home() {
   const { data, loading } = usePollingFetch<TrendingData>("/api/trending", 10000);
 
   return (
-    <div className="flex">
+    <div className="flex animate-fadeIn">
       {/* Main content */}
       <div className="flex-1 p-6 max-w-[1040px]">
         {/* Category and chain filters */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-6 animate-fadeInDown">
           <CategoryTabs active={activeCategory} onChange={setActiveCategory} />
           <div className="flex items-center gap-3">
             <ChainFilters active={activeChain} onChange={setActiveChain} />
@@ -50,7 +50,7 @@ export default function Home() {
         <div className="flex items-center gap-2 mb-6">
           <button
             onClick={() => setActiveTab("nfts")}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 btn-press ${
               activeTab === "nfts"
                 ? "bg-[#2a2a2a] text-white"
                 : "text-[#8a8a8a] hover:text-white"
@@ -60,7 +60,7 @@ export default function Home() {
           </button>
           <button
             onClick={() => setActiveTab("tokens")}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 btn-press ${
               activeTab === "tokens"
                 ? "bg-[#2a2a2a] text-white"
                 : "text-[#8a8a8a] hover:text-white"
@@ -72,10 +72,10 @@ export default function Home() {
 
         {/* Hero Carousel */}
         {loading ? (
-          <div className="h-[380px] bg-[#1e1e1e] rounded-2xl animate-pulse mb-8" />
+          <div className="h-[380px] bg-[#1e1e1e] rounded-2xl animate-shimmer mb-8" />
         ) : (
           data?.featuredCollections && (
-            <div className="mb-8">
+            <div className="mb-8 animate-fadeInUp">
               <HeroCarousel collections={data.featuredCollections} />
             </div>
           )
@@ -84,10 +84,10 @@ export default function Home() {
         {/* Trending Tokens */}
         {loading ? (
           <div className="mb-8">
-            <div className="h-6 bg-[#1e1e1e] rounded w-40 mb-4 animate-pulse" />
+            <div className="h-6 bg-[#1e1e1e] rounded w-40 mb-4 animate-shimmer" />
             <div className="grid grid-cols-3 gap-3">
               {[1, 2, 3, 4, 5, 6].map((i) => (
-                <div key={i} className="h-20 bg-[#1e1e1e] rounded-xl animate-pulse" />
+                <div key={i} className="h-20 bg-[#1e1e1e] rounded-xl animate-shimmer" style={{ animationDelay: `${i * 0.1}s` }} />
               ))}
             </div>
           </div>

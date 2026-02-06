@@ -36,6 +36,7 @@ export async function GET(
   }, async (rootSpan) => {
     try {
       maybeFault('http500', { route: '/api/collections/[slug]/items', slug });
+      maybeFault('http502', { route: '/api/collections/[slug]/items' });
       maybeFault('http503', { route: '/api/collections/[slug]/items' });
       maybeFault('http429', { route: '/api/collections/[slug]/items' });
 

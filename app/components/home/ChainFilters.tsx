@@ -19,7 +19,7 @@ export default function ChainFilters({ active, onChange }: ChainFiltersProps) {
         <button
           key={chain.id}
           onClick={() => onChange(chain.id)}
-          className={`w-9 h-9 rounded-full flex items-center justify-center text-sm transition-colors ${
+          className={`w-9 h-9 rounded-full flex items-center justify-center text-sm transition-all duration-200 btn-press ${
             active === chain.id
               ? "bg-white text-black"
               : "bg-[#1e1e1e] text-[#8a8a8a] hover:bg-[#2a2a2a]"

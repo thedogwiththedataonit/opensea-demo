@@ -19,7 +19,7 @@ export default function CategoryTabs({ active, onChange }: CategoryTabsProps) {
         <button
           key={cat.id}
           onClick={() => onChange(cat.id)}
-          className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium transition-colors ${
+          className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 btn-press ${
             active === cat.id
               ? "bg-white text-black"
               : "bg-[#1e1e1e] text-[#8a8a8a] hover:text-white hover:bg-[#2a2a2a]"
@@ -29,7 +29,7 @@ export default function CategoryTabs({ active, onChange }: CategoryTabsProps) {
           {cat.label}
         </button>
       ))}
-      <button className="flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium bg-[#1e1e1e] text-[#8a8a8a] hover:text-white hover:bg-[#2a2a2a] transition-colors">
+      <button className="flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium bg-[#1e1e1e] text-[#8a8a8a] hover:text-white hover:bg-[#2a2a2a] transition-all duration-200 btn-press">
         More
       </button>
     </div>

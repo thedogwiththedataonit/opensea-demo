@@ -1,95 +1,105 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { usePollingFetch } from "@/app/hooks/usePollingFetch";
-
-interface OHLCPoint {
-  timestamp: number;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-}
-
-interface ChartData {
-  token: string;
-  chain: string;
-  timeframe: string;
-  interval: string;
-  data: OHLCPoint[];
-}
+import { useState, useCallback } from "react";
+import {
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  CartesianGrid,
+  ReferenceLine,
+} from "recharts";
+import { useRealtimeChartData, RealtimeOHLCPoint } from "@/app/hooks/useRealtimeChartData";
 
 interface PriceChartProps {
   chain: string;
   address: string;
 }
 
-const TIMEFRAMES = ["1h", "1d", "7d", "30d"];
-const INTERVALS: Record<string, string> = {
-  "1h": "1m",
-  "1d": "5m",
-  "7d": "1h",
-  "30d": "4h",
+const TIMEFRAMES = ["1h", "1d", "7d", "30d"] as const;
+
+const TIMEFRAME_CONFIG: Record<string, { points: number; interval: number; volatility: number; label: string }> = {
+  "1h": { points: 60, interval: 1500, volatility: 0.008, label: "1m" },
+  "1d": { points: 72, interval: 2000, volatility: 0.012, label: "5m" },
+  "7d": { points: 84, interval: 3000, volatility: 0.02, label: "1h" },
+  "30d": { points: 90, interval: 4000, volatility: 0.03, label: "4h" },
 };
 
-export default function PriceChart({ chain, address }: PriceChartProps) {
-  const [timeframe, setTimeframe] = useState("1h");
-  const [showCandles, setShowCandles] = useState(false);
-  const interval = INTERVALS[timeframe] || "1m";
+// Generate a deterministic-ish base price from the address string
+function basePriceFromAddress(address: string): number {
+  let hash = 0;
+  for (let i = 0; i < address.length; i++) {
+    hash = (hash * 31 + address.charCodeAt(i)) & 0xffffffff;
+  }
+  // Price between $0.001 and $5000
+  const normalized = (hash >>> 0) / 0xffffffff;
+  return Math.pow(10, normalized * 6.7 - 3);
+}
 
-  const { data: chartData } = usePollingFetch<ChartData>(
-    `/api/tokens/${chain}/${address}/chart?timeframe=${timeframe}&interval=${interval}`,
-    5000
+function formatPrice(p: number): string {
+  if (p >= 1000) return `$${p.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+  if (p >= 1) return `$${p.toFixed(2)}`;
+  if (p >= 0.01) return `$${p.toFixed(4)}`;
+  return `$${p.toFixed(6)}`;
+}
+
+function CustomTooltip({ active, payload }: { active?: boolean; payload?: Array<{ payload: RealtimeOHLCPoint }> }) {
+  if (!active || !payload?.length) return null;
+  const d = payload[0].payload;
+  return (
+    <div className="bg-[#1e1e1e] border border-[#3a3a3a] rounded-lg px-3 py-2 shadow-xl text-xs">
+      <div className="text-[#8a8a8a] mb-1">{d.time}</div>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+        <span className="text-[#8a8a8a]">Open</span>
+        <span className="text-white font-mono text-right">{formatPrice(d.open)}</span>
+        <span className="text-[#8a8a8a]">High</span>
+        <span className="text-green-400 font-mono text-right">{formatPrice(d.high)}</span>
+        <span className="text-[#8a8a8a]">Low</span>
+        <span className="text-red-400 font-mono text-right">{formatPrice(d.low)}</span>
+        <span className="text-[#8a8a8a]">Close</span>
+        <span className="text-white font-mono text-right">{formatPrice(d.close)}</span>
+      </div>
+    </div>
+  );
+}
+
+export default function PriceChart({ chain, address }: PriceChartProps) {
+  const [timeframe, setTimeframe] = useState<string>("1h");
+  const config = TIMEFRAME_CONFIG[timeframe];
+
+  const basePrice = basePriceFromAddress(address + chain);
+
+  const { data, currentPrice, priceChangePct, isPositive } = useRealtimeChartData({
+    pointCount: config.points,
+    updateIntervalMs: config.interval,
+    basePrice,
+    volatility: config.volatility,
+    timeframe,
+  });
+
+  const lineColor = isPositive ? "#22c55e" : "#ef4444";
+  const gradientId = `priceGradient-${chain}-${address}`;
+
+  // Format Y-axis tick
+  const formatYTick = useCallback(
+    (value: number) => {
+      if (value >= 1000) return `$${(value / 1000).toFixed(1)}k`;
+      if (value >= 1) return `$${value.toFixed(2)}`;
+      if (value >= 0.01) return `$${value.toFixed(4)}`;
+      return `$${value.toFixed(6)}`;
+    },
+    []
   );
 
-  const { points, minPrice, maxPrice, width, height, timeLabels } = useMemo(() => {
-    const w = 700;
-    const h = 300;
-    const padding = 40;
+  // Compute domain for Y-axis
+  const prices = data.map((d) => d.close);
+  const minPrice = prices.length ? Math.min(...prices) * 0.998 : 0;
+  const maxPrice = prices.length ? Math.max(...prices) * 1.002 : 100;
 
-    if (!chartData?.data?.length) {
-      return { points: "", minPrice: 0, maxPrice: 0, width: w, height: h, timeLabels: [] };
-    }
-
-    const prices = chartData.data.map((d) => d.close);
-    const min = Math.min(...prices) * 0.999;
-    const max = Math.max(...prices) * 1.001;
-    const range = max - min || 1;
-
-    const pts = chartData.data
-      .map((d, i) => {
-        const x = padding + (i / (chartData.data.length - 1)) * (w - padding * 2);
-        const y = padding + (1 - (d.close - min) / range) * (h - padding * 2);
-        return `${x},${y}`;
-      })
-      .join(" ");
-
-    // Generate time labels
-    const labels: { x: number; label: string }[] = [];
-    const step = Math.max(1, Math.floor(chartData.data.length / 6));
-    for (let i = 0; i < chartData.data.length; i += step) {
-      const d = chartData.data[i];
-      const x = padding + (i / (chartData.data.length - 1)) * (w - padding * 2);
-      const date = new Date(d.timestamp);
-      const label =
-        timeframe === "1h" || timeframe === "1d"
-          ? date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
-          : date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-      labels.push({ x, label });
-    }
-
-    return { points: pts, minPrice: min, maxPrice: max, width: w, height: h, timeLabels: labels };
-  }, [chartData, timeframe]);
-
-  // Gradient area fill
-  const areaPath = points
-    ? `M${points.split(" ")[0]} ${points} L${width - 40},${height - 40} L40,${height - 40} Z`
-    : "";
-
-  const trendUp = chartData?.data?.length
-    ? chartData.data[chartData.data.length - 1].close >= chartData.data[0].close
-    : true;
-  const lineColor = trendUp ? "#f59e0b" : "#ef4444";
+  // Reference line at the open price
+  const openPrice = data.length ? data[0].open : basePrice;
 
   return (
     <div className="w-full">
@@ -113,97 +123,98 @@ export default function PriceChart({ chain, address }: PriceChartProps) {
         </div>
         <div className="flex items-center gap-1 bg-[#1e1e1e] rounded-lg p-1">
           <span className="text-xs text-[#8a8a8a] px-2">Interval:</span>
-          <span className="text-xs text-white px-2">{interval}</span>
+          <span className="text-xs text-white px-2">{config.label}</span>
         </div>
-        <div className="flex items-center gap-1 bg-[#1e1e1e] rounded-lg p-1 ml-auto">
-          <button
-            onClick={() => setShowCandles(false)}
-            className={`p-1.5 rounded-md ${!showCandles ? "bg-[#333]" : ""}`}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={!showCandles ? "white" : "#666"} strokeWidth="2">
-              <polyline points="22,12 18,8 14,14 10,10 6,16 2,12" />
-            </svg>
-          </button>
-          <button
-            onClick={() => setShowCandles(true)}
-            className={`p-1.5 rounded-md ${showCandles ? "bg-[#333]" : ""}`}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={showCandles ? "white" : "#666"} strokeWidth="2">
-              <rect x="4" y="6" width="4" height="12" />
-              <rect x="10" y="4" width="4" height="16" />
-              <rect x="16" y="8" width="4" height="8" />
-            </svg>
-          </button>
+
+        {/* Live indicator */}
+        <div className="flex items-center gap-1.5 ml-auto bg-[#1e1e1e] rounded-lg px-3 py-1">
+          <span className="relative flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
+          </span>
+          <span className="text-xs text-green-400 font-medium">LIVE</span>
+        </div>
+
+        {/* Current price + change badge */}
+        <div className="flex items-center gap-2 bg-[#1e1e1e] rounded-lg px-3 py-1">
+          <span className="text-xs font-mono text-white">{formatPrice(currentPrice)}</span>
+          <span className={`text-xs font-medium ${isPositive ? "text-green-400" : "text-red-400"}`}>
+            {isPositive ? "▲" : "▼"} {Math.abs(priceChangePct).toFixed(2)}%
+          </span>
         </div>
       </div>
 
-      {/* Chart SVG */}
+      {/* Chart */}
       <div className="bg-[#0d0d0d] rounded-xl p-2">
-        <svg viewBox={`0 0 ${width} ${height}`} className="w-full" style={{ height: 300 }}>
-          <defs>
-            <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={lineColor} stopOpacity="0.2" />
-              <stop offset="100%" stopColor={lineColor} stopOpacity="0" />
-            </linearGradient>
-          </defs>
+        <ResponsiveContainer width="100%" height={300}>
+          <AreaChart data={data} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
+            <defs>
+              <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={lineColor} stopOpacity={0.25} />
+                <stop offset="100%" stopColor={lineColor} stopOpacity={0} />
+              </linearGradient>
+            </defs>
 
-          {/* Grid lines */}
-          {[0.25, 0.5, 0.75].map((pct) => (
-            <line
-              key={pct}
-              x1={40}
-              y1={40 + pct * (height - 80)}
-              x2={width - 40}
-              y2={40 + pct * (height - 80)}
+            <CartesianGrid
+              strokeDasharray="3 3"
               stroke="#1e1e1e"
-              strokeWidth="1"
+              horizontal={true}
+              vertical={false}
             />
-          ))}
 
-          {/* Area fill */}
-          {areaPath && (
-            <path d={areaPath} fill="url(#chartGrad)" />
-          )}
+            <XAxis
+              dataKey="time"
+              tick={{ fontSize: 10, fill: "#666", fontFamily: "monospace" }}
+              axisLine={false}
+              tickLine={false}
+              interval="preserveStartEnd"
+              minTickGap={50}
+            />
 
-          {/* Line */}
-          {points && (
-            <polyline
-              points={points}
-              fill="none"
+            <YAxis
+              domain={[minPrice, maxPrice]}
+              tick={{ fontSize: 10, fill: "#666", fontFamily: "monospace" }}
+              axisLine={false}
+              tickLine={false}
+              orientation="right"
+              tickFormatter={formatYTick}
+              width={70}
+            />
+
+            <Tooltip
+              content={<CustomTooltip />}
+              cursor={{
+                stroke: "#555",
+                strokeWidth: 1,
+                strokeDasharray: "4 4",
+              }}
+              isAnimationActive={false}
+            />
+
+            <ReferenceLine
+              y={openPrice}
+              stroke="#555"
+              strokeDasharray="3 3"
+              strokeWidth={1}
+            />
+
+            <Area
+              type="monotone"
+              dataKey="close"
               stroke={lineColor}
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
+              strokeWidth={2}
+              fill={`url(#${gradientId})`}
+              dot={false}
+              activeDot={{
+                r: 4,
+                fill: lineColor,
+                stroke: "#0d0d0d",
+                strokeWidth: 2,
+              }}
+              isAnimationActive={false}
             />
-          )}
-
-          {/* Time labels */}
-          {timeLabels.map((tl, i) => (
-            <text
-              key={i}
-              x={tl.x}
-              y={height - 10}
-              textAnchor="middle"
-              fill="#666"
-              fontSize="10"
-              fontFamily="monospace"
-            >
-              {tl.label}
-            </text>
-          ))}
-
-          {/* Price labels */}
-          {maxPrice > 0 && (
-            <>
-              <text x={width - 5} y={45} textAnchor="end" fill="#666" fontSize="10" fontFamily="monospace">
-                ${maxPrice < 1 ? maxPrice.toFixed(6) : maxPrice.toFixed(2)}
-              </text>
-              <text x={width - 5} y={height - 45} textAnchor="end" fill="#666" fontSize="10" fontFamily="monospace">
-                ${minPrice < 1 ? minPrice.toFixed(6) : minPrice.toFixed(2)}
-              </text>
-            </>
-          )}
-        </svg>
+          </AreaChart>
+        </ResponsiveContainer>
       </div>
     </div>
   );

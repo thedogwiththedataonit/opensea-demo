@@ -33,6 +33,7 @@ export async function GET(request: NextRequest) {
   return withSpan(tracer, 'marketplace.search', { [MA.SEARCH_QUERY]: q }, async (rootSpan) => {
     try {
       maybeFault('http500', { route: '/api/search', query: q });
+      maybeFault('http502', { route: '/api/search' });
       maybeFault('http503', { route: '/api/search' });
       maybeFault('http429', { route: '/api/search' });
 

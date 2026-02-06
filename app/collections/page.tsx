@@ -34,13 +34,13 @@ export default function CollectionsPage() {
   }
 
   return (
-    <div className="flex">
+    <div className="flex animate-fadeIn">
       {/* Filter sidebar */}
       {showFilters && (
-        <div className="w-[260px] border-r border-[#2a2a2a] p-4 flex-shrink-0">
+        <div className="w-[260px] border-r border-[#2a2a2a] p-4 flex-shrink-0 animate-slideInLeft">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-sm font-semibold">Filter By</h3>
-            <button onClick={() => setShowFilters(false)} className="text-[#8a8a8a] hover:text-white">
+            <button onClick={() => setShowFilters(false)} className="text-[#8a8a8a] hover:text-white transition-colors">
               ≪
             </button>
           </div>
@@ -48,7 +48,7 @@ export default function CollectionsPage() {
           {/* Tabs */}
           <div className="flex items-center gap-1 mb-4">
             <button className="text-xs bg-[#2a2a2a] text-white px-3 py-1.5 rounded-lg">🖼️ Collections</button>
-            <Link href="/tokens" className="text-xs text-[#8a8a8a] hover:text-white px-3 py-1.5 rounded-lg hover:bg-[#1e1e1e]">
+            <Link href="/tokens" className="text-xs text-[#8a8a8a] hover:text-white px-3 py-1.5 rounded-lg hover:bg-[#1e1e1e] transition-colors">
               ◎ Tokens
             </Link>
           </div>
@@ -61,14 +61,14 @@ export default function CollectionsPage() {
             <input
               type="text"
               placeholder="Search for chains"
-              className="w-full bg-[#1e1e1e] border border-[#333] rounded-lg px-3 py-2 text-xs text-white placeholder-[#666] outline-none mb-2"
+              className="w-full bg-[#1e1e1e] border border-[#333] rounded-lg px-3 py-2 text-xs text-white placeholder-[#666] outline-none mb-2 focus:border-[#555] transition-colors"
             />
             <div className="flex flex-wrap gap-1.5">
               {CHAINS.map((chain) => (
                 <button
                   key={chain.id}
                   onClick={() => setActiveChain(chain.id)}
-                  className={`px-3 py-1.5 rounded-full text-xs transition-colors ${
+                  className={`px-3 py-1.5 rounded-full text-xs transition-all duration-200 btn-press ${
                     activeChain === chain.id
                       ? "bg-white text-black"
                       : "bg-[#1e1e1e] text-[#8a8a8a] hover:bg-[#2a2a2a]"
@@ -88,7 +88,7 @@ export default function CollectionsPage() {
         {!showFilters && (
           <button
             onClick={() => setShowFilters(true)}
-            className="text-[#8a8a8a] hover:text-white text-sm mb-4 flex items-center gap-1"
+            className="text-[#8a8a8a] hover:text-white text-sm mb-4 flex items-center gap-1 transition-colors"
           >
             ≫ Filters
           </button>
@@ -100,7 +100,7 @@ export default function CollectionsPage() {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 btn-press ${
                 activeTab === tab.id
                   ? "bg-[#2a2a2a] text-white"
                   : "text-[#8a8a8a] hover:text-white"
@@ -120,29 +120,31 @@ export default function CollectionsPage() {
               <thead>
                 <tr className="text-xs text-[#8a8a8a] uppercase tracking-wider border-b border-[#2a2a2a]">
                   <th className="text-left py-3 px-4 font-medium">Collection</th>
-                  <th className="text-right py-3 px-4 font-medium cursor-pointer hover:text-white" onClick={() => handleSort("floor")}>
+                  <th className="text-right py-3 px-4 font-medium cursor-pointer hover:text-white transition-colors" onClick={() => handleSort("floor")}>
                     Floor Price {sort === "floor" && "↓"}
                   </th>
-                  <th className="text-right py-3 px-4 font-medium cursor-pointer hover:text-white" onClick={() => handleSort("change1d")}>
+                  <th className="text-right py-3 px-4 font-medium cursor-pointer hover:text-white transition-colors" onClick={() => handleSort("change1d")}>
                     1D Change {sort === "change1d" && "↓"}
                   </th>
-                  <th className="text-right py-3 px-4 font-medium cursor-pointer hover:text-white" onClick={() => handleSort("change7d")}>
+                  <th className="text-right py-3 px-4 font-medium cursor-pointer hover:text-white transition-colors" onClick={() => handleSort("change7d")}>
                     7D Change {sort === "change7d" && "↓"}
                   </th>
-                  <th className="text-right py-3 px-4 font-medium cursor-pointer hover:text-white" onClick={() => handleSort("volume")}>
+                  <th className="text-right py-3 px-4 font-medium cursor-pointer hover:text-white transition-colors" onClick={() => handleSort("volume")}>
                     Volume {sort === "volume" && "↓"}
                   </th>
-                  <th className="text-right py-3 px-4 font-medium cursor-pointer hover:text-white" onClick={() => handleSort("items")}>
+                  <th className="text-right py-3 px-4 font-medium cursor-pointer hover:text-white transition-colors" onClick={() => handleSort("items")}>
                     Items {sort === "items" && "↓"}
                   </th>
                 </tr>
               </thead>
               <tbody>
-                {data?.data.map((c) => (
-                  <tr key={c.slug} className="border-b border-[#1e1e1e] hover:bg-[#1a1a1a] transition-colors">
+                {data?.data.map((c, index) => (
+                  <tr key={c.slug} className={`border-b border-[#1e1e1e] hover:bg-[#1a1a1a] transition-all duration-150 row-hover animate-fadeInUp stagger-${Math.min(index + 1, 12)}`}>
                     <td className="py-3 px-4">
                       <Link href={`/collection/${c.slug}`} className="flex items-center gap-3">
-                        <img src={c.imageUrl} alt={c.name} className="w-10 h-10 rounded-full" />
+                        <div className="w-10 h-10 rounded-full overflow-hidden flex-shrink-0">
+                          <img src={c.imageUrl} alt={c.name} className="w-full h-full object-cover" />
+                        </div>
                         <div>
                           <div className="text-sm text-white flex items-center gap-1">
                             {c.name}
@@ -151,17 +153,17 @@ export default function CollectionsPage() {
                         </div>
                       </Link>
                     </td>
-                    <td className="text-right py-3 px-4 text-sm font-mono">
-                      {c.floorPrice < 0.01 ? "< 0.01" : c.floorPrice.toFixed(2)} {c.floorCurrency}
+                    <td className="text-right py-3 px-4 text-sm font-mono number-transition">
+                      <span className="dynamic-data">{c.floorPrice < 0.01 ? "< 0.01" : c.floorPrice.toFixed(2)}</span> {c.floorCurrency}
                     </td>
-                    <td className={`text-right py-3 px-4 text-sm ${c.change1d >= 0 ? "text-green-400" : "text-red-400"}`}>
-                      {c.change1d >= 0 ? "+" : ""}{c.change1d.toFixed(1)}%
+                    <td className={`text-right py-3 px-4 text-sm number-transition ${c.change1d >= 0 ? "text-green-400" : "text-red-400"}`}>
+                      <span className="dynamic-data">{c.change1d >= 0 ? "+" : ""}{c.change1d.toFixed(1)}%</span>
                     </td>
-                    <td className={`text-right py-3 px-4 text-sm ${c.change7d >= 0 ? "text-green-400" : "text-red-400"}`}>
-                      {c.change7d >= 0 ? "+" : ""}{c.change7d.toFixed(1)}%
+                    <td className={`text-right py-3 px-4 text-sm number-transition ${c.change7d >= 0 ? "text-green-400" : "text-red-400"}`}>
+                      <span className="dynamic-data">{c.change7d >= 0 ? "+" : ""}{c.change7d.toFixed(1)}%</span>
                     </td>
-                    <td className="text-right py-3 px-4 text-sm font-mono">
-                      {(c.totalVolume / 1000).toFixed(1)}K {c.totalVolumeCurrency}
+                    <td className="text-right py-3 px-4 text-sm font-mono number-transition">
+                      <span className="dynamic-data">{(c.totalVolume / 1000).toFixed(1)}K</span> {c.totalVolumeCurrency}
                     </td>
                     <td className="text-right py-3 px-4 text-sm font-mono">
                       {c.itemCount.toLocaleString()}

@@ -15,6 +15,7 @@ import { tracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing
 import { handleRouteError } from "@/app/lib/error-handler";
 import { maybeFault } from "@/app/lib/busybox";
 import { ValidationError } from "@/app/lib/errors";
+import { enrichTokenFields } from "@/app/lib/faker-enrich";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +38,7 @@ export async function GET(request: NextRequest) {
   }, async (rootSpan) => {
     try {
       maybeFault('http500', { route: '/api/tokens' });
+      maybeFault('http502', { route: '/api/tokens' });
       maybeFault('http503', { route: '/api/tokens' });
       maybeFault('http429', { route: '/api/tokens' });
 
@@ -101,11 +103,15 @@ export async function GET(request: NextRequest) {
       });
 
       const withSparklineData = await withSpan(tracer, 'marketplace.tokens.sparkline_extraction', { [MA.RESULT_COUNT]: paginated.length }, async (span) => {
-        const results = paginated.map((t) => ({
-          ...t,
-          sparkline: getSparklineData(t.priceHistory, 20).map((p) => p.price),
-          priceHistory: undefined,
-        }));
+        const results = paginated.map((t) => {
+          const enriched = enrichTokenFields(t);
+          return {
+            ...t,
+            ...enriched,
+            sparkline: getSparklineData(t.priceHistory, 20).map((p) => p.price),
+            priceHistory: undefined,
+          };
+        });
         span.setAttribute(MA.RESULT_COUNT, results.length);
         return results;
       });

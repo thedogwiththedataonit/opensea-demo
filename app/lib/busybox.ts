@@ -10,6 +10,7 @@
  *
  * Each fault type maps to a specific MarketplaceError subclass:
  *  - http500  → InternalError
+ *  - http502  → BadGatewayError (mimics Vercel ROUTER_EXTERNAL_TARGET_ERROR)
  *  - http503  → ServiceUnavailableError
  *  - http429  → RateLimitError
  *  - http422  → UnprocessableError
@@ -19,6 +20,7 @@
 
 import {
   InternalError,
+  BadGatewayError,
   ServiceUnavailableError,
   RateLimitError,
   UnprocessableError,
@@ -32,6 +34,8 @@ import {
 export interface BusyboxFaults {
   /** Random 500 Internal Server Errors on any route */
   http500: boolean;
+  /** Bad Gateway (502) — simulates upstream/external target failures (Vercel ROUTER_EXTERNAL_TARGET_ERROR) */
+  http502: boolean;
   /** Service Unavailable (503) — simulates downstream outages */
   http503: boolean;
   /** Rate Limiting (429) — simulates throttling */
@@ -62,6 +66,7 @@ const state: BusyboxState = {
   errorRate: 0.3,
   enabledFaults: {
     http500: true,
+    http502: true,
     http503: true,
     http429: true,
     http422: true,
@@ -135,6 +140,13 @@ export function maybeFault(
       throw new InternalError(
         'BUSYBOX_INTERNAL_ERROR',
         'Simulated internal server error (busybox chaos injection)',
+        faultContext
+      );
+
+    case 'http502':
+      throw new BadGatewayError(
+        'BUSYBOX_BAD_GATEWAY',
+        'Simulated bad gateway — upstream service returned invalid response (busybox chaos injection, mimics Vercel ROUTER_EXTERNAL_TARGET_ERROR)',
         faultContext
       );
 
