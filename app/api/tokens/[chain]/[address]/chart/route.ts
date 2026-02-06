@@ -14,6 +14,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { tokens } from "@/app/lib/data/tokens";
 import { ensurePriceEngine, getOHLCData } from "@/app/lib/price-engine";
 import { simulateLatency, simulateDbLatency } from "@/app/lib/utils";
+import { SpanStatusCode } from "@opentelemetry/api";
 import { apiTracer, dataTracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
 import { handleRouteError } from "@/app/lib/error-handler";
 import { maybeFault } from "@/app/lib/busybox";
@@ -34,10 +35,12 @@ export async function GET(
   const timeframe = searchParams.get("timeframe") || "1h";
   const interval = searchParams.get("interval") || "1m";
 
-  return withSpan(apiTracer, 'marketplace.token.chart', {
-    [MA.HTTP_METHOD]: 'GET',
-    [MA.HTTP_ROUTE]: '/api/tokens/[chain]/[address]/chart',
-    [MA.CHAIN]: chain, [MA.TOKEN_ADDRESS]: address, [MA.CHART_TIMEFRAME]: timeframe, [MA.CHART_INTERVAL]: interval,
+  return apiTracer.startActiveSpan('marketplace.token.chart', {
+    attributes: {
+      [MA.HTTP_METHOD]: 'GET',
+      [MA.HTTP_ROUTE]: '/api/tokens/[chain]/[address]/chart',
+      [MA.CHAIN]: chain, [MA.TOKEN_ADDRESS]: address, [MA.CHART_TIMEFRAME]: timeframe, [MA.CHART_INTERVAL]: interval,
+    },
   }, async (rootSpan) => {
     try {
       maybeFault('http500', { route: '/api/tokens/[chain]/[address]/chart', chain, address });
@@ -82,10 +85,13 @@ export async function GET(
       rootSpan.setAttribute(MA.CHART_CANDLE_COUNT, ohlc.length);
       rootSpan.setAttribute(MA.HTTP_STATUS_CODE, 200);
       rootSpan.setAttribute(MA.RESPONSE_ITEMS, ohlc.length);
+      rootSpan.setStatus({ code: SpanStatusCode.OK });
 
       return NextResponse.json({ token: token.symbol, chain: token.chain, timeframe, interval, data: ohlc });
     } catch (error) {
       return await handleRouteError(error, rootSpan);
+    } finally {
+      rootSpan.end();
     }
   });
 }

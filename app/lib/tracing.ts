@@ -161,8 +161,6 @@ export async function withSpan<T>(
       if (error instanceof Error) {
         span.recordException(error);
       }
-      // Create a dedicated error child span with its own duration
-      await withErrorSpan(t, error, { [MA.ERROR_ORIGIN_SPAN]: name });
       throw error;
     } finally {
       span.end();

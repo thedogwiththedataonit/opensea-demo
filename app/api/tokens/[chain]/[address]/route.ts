@@ -16,6 +16,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { tokens } from "@/app/lib/data/tokens";
 import { ensurePriceEngine } from "@/app/lib/price-engine";
 import { simulateLatency, simulateDbLatency } from "@/app/lib/utils";
+import { SpanStatusCode } from "@opentelemetry/api";
 import { apiTracer, dataTracer, enrichTracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
 import { handleRouteError } from "@/app/lib/error-handler";
 import { maybeFault } from "@/app/lib/busybox";
@@ -78,10 +79,12 @@ export async function GET(
   ensurePriceEngine();
   const { chain, address } = await params;
 
-  return withSpan(apiTracer, 'marketplace.token.detail', {
-    [MA.HTTP_METHOD]: 'GET',
-    [MA.HTTP_ROUTE]: '/api/tokens/[chain]/[address]',
-    [MA.CHAIN]: chain, [MA.TOKEN_ADDRESS]: address,
+  return apiTracer.startActiveSpan('marketplace.token.detail', {
+    attributes: {
+      [MA.HTTP_METHOD]: 'GET',
+      [MA.HTTP_ROUTE]: '/api/tokens/[chain]/[address]',
+      [MA.CHAIN]: chain, [MA.TOKEN_ADDRESS]: address,
+    },
   }, async (rootSpan) => {
     try {
       maybeFault('http500', { route: '/api/tokens/[chain]/[address]', chain, address });
@@ -133,6 +136,7 @@ export async function GET(
       rootSpan.setAttribute(MA.TOKEN_PRICE_USD, enriched.price);
       rootSpan.setAttribute(MA.HTTP_STATUS_CODE, 200);
       rootSpan.setAttribute(MA.RESPONSE_ITEMS, 1);
+      rootSpan.setStatus({ code: SpanStatusCode.OK });
       const { priceHistory, ...tokenData } = token;
       return NextResponse.json({
         ...tokenData,
@@ -143,6 +147,8 @@ export async function GET(
       });
     } catch (error) {
       return await handleRouteError(error, rootSpan);
+    } finally {
+      rootSpan.end();
     }
   });
 }

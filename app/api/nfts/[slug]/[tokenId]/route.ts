@@ -15,6 +15,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { nftsByCollection } from "@/app/lib/data/collections";
 import { ensurePriceEngine } from "@/app/lib/price-engine";
 import { simulateLatency, simulateDbLatency } from "@/app/lib/utils";
+import { SpanStatusCode } from "@opentelemetry/api";
 import { apiTracer, dataTracer, enrichTracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
 import { handleRouteError } from "@/app/lib/error-handler";
 import { maybeFault } from "@/app/lib/busybox";
@@ -77,10 +78,12 @@ export async function GET(
   ensurePriceEngine();
   const { slug, tokenId } = await params;
 
-  return withSpan(apiTracer, 'marketplace.nft.detail', {
-    [MA.HTTP_METHOD]: 'GET',
-    [MA.HTTP_ROUTE]: '/api/nfts/[slug]/[tokenId]',
-    [MA.COLLECTION_SLUG]: slug, [MA.NFT_TOKEN_ID]: tokenId,
+  return apiTracer.startActiveSpan('marketplace.nft.detail', {
+    attributes: {
+      [MA.HTTP_METHOD]: 'GET',
+      [MA.HTTP_ROUTE]: '/api/nfts/[slug]/[tokenId]',
+      [MA.COLLECTION_SLUG]: slug, [MA.NFT_TOKEN_ID]: tokenId,
+    },
   }, async (rootSpan) => {
     try {
       maybeFault('http500', { route: '/api/nfts/[slug]/[tokenId]', slug, tokenId });
@@ -143,9 +146,12 @@ export async function GET(
       rootSpan.setAttribute(MA.CHAIN, nft.chain);
       rootSpan.setAttribute(MA.HTTP_STATUS_CODE, 200);
       rootSpan.setAttribute(MA.RESPONSE_ITEMS, 1);
+      rootSpan.setStatus({ code: SpanStatusCode.OK });
       return NextResponse.json({ ...nft, comments });
     } catch (error) {
       return await handleRouteError(error, rootSpan);
+    } finally {
+      rootSpan.end();
     }
   });
 }

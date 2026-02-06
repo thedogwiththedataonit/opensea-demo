@@ -16,6 +16,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { collections } from "@/app/lib/data/collections";
 import { ensurePriceEngine } from "@/app/lib/price-engine";
 import { simulateLatency, simulateDbLatency } from "@/app/lib/utils";
+import { SpanStatusCode } from "@opentelemetry/api";
 import { apiTracer, dataTracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
 import { handleRouteError } from "@/app/lib/error-handler";
 import { maybeFault } from "@/app/lib/busybox";
@@ -35,11 +36,13 @@ export async function GET(request: NextRequest) {
   const q = searchParams.get("q")?.toLowerCase() || "";
   const category = searchParams.get("category") || "all";
 
-  return withSpan(apiTracer, 'marketplace.collections.list', {
-    [MA.HTTP_METHOD]: 'GET',
-    [MA.HTTP_ROUTE]: '/api/collections',
-    [MA.FILTER_CHAIN]: chain, [MA.FILTER_SORT]: sort, [MA.FILTER_CATEGORY]: category,
-    [MA.PAGINATION_LIMIT]: limit, [MA.PAGINATION_OFFSET]: offset,
+  return apiTracer.startActiveSpan('marketplace.collections.list', {
+    attributes: {
+      [MA.HTTP_METHOD]: 'GET',
+      [MA.HTTP_ROUTE]: '/api/collections',
+      [MA.FILTER_CHAIN]: chain, [MA.FILTER_SORT]: sort, [MA.FILTER_CATEGORY]: category,
+      [MA.PAGINATION_LIMIT]: limit, [MA.PAGINATION_OFFSET]: offset,
+    },
   }, async (rootSpan) => {
     try {
       maybeFault('http500', { route: '/api/collections' });
@@ -109,9 +112,12 @@ export async function GET(request: NextRequest) {
       rootSpan.setAttribute(MA.RESULT_COUNT, enriched.length);
       rootSpan.setAttribute(MA.HTTP_STATUS_CODE, 200);
       rootSpan.setAttribute(MA.RESPONSE_ITEMS, enriched.length);
+      rootSpan.setStatus({ code: SpanStatusCode.OK });
       return NextResponse.json({ data: enriched, total, limit, offset, hasMore });
     } catch (error) {
       return await handleRouteError(error, rootSpan);
+    } finally {
+      rootSpan.end();
     }
   });
 }

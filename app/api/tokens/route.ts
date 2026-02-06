@@ -18,6 +18,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { tokens } from "@/app/lib/data/tokens";
 import { ensurePriceEngine, getSparklineData } from "@/app/lib/price-engine";
 import { simulateLatency, simulateDbLatency } from "@/app/lib/utils";
+import { SpanStatusCode } from "@opentelemetry/api";
 import { apiTracer, dataTracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
 import { handleRouteError } from "@/app/lib/error-handler";
 import { maybeFault } from "@/app/lib/busybox";
@@ -39,11 +40,13 @@ export async function GET(request: NextRequest) {
   const fdvMin = parseFloat(searchParams.get("fdvMin") || "0");
   const fdvMax = parseFloat(searchParams.get("fdvMax") || "999999999999");
 
-  return withSpan(apiTracer, 'marketplace.tokens.list', {
-    [MA.HTTP_METHOD]: 'GET',
-    [MA.HTTP_ROUTE]: '/api/tokens',
-    [MA.FILTER_TAB]: tab, [MA.FILTER_CHAIN]: chain, [MA.FILTER_SORT]: sort,
-    [MA.FILTER_ORDER]: order, [MA.PAGINATION_LIMIT]: limit, [MA.PAGINATION_OFFSET]: offset,
+  return apiTracer.startActiveSpan('marketplace.tokens.list', {
+    attributes: {
+      [MA.HTTP_METHOD]: 'GET',
+      [MA.HTTP_ROUTE]: '/api/tokens',
+      [MA.FILTER_TAB]: tab, [MA.FILTER_CHAIN]: chain, [MA.FILTER_SORT]: sort,
+      [MA.FILTER_ORDER]: order, [MA.PAGINATION_LIMIT]: limit, [MA.PAGINATION_OFFSET]: offset,
+    },
   }, async (rootSpan) => {
     try {
       maybeFault('http500', { route: '/api/tokens' });
@@ -142,9 +145,12 @@ export async function GET(request: NextRequest) {
       rootSpan.setAttribute(MA.RESULT_COUNT, withSparklineData.length);
       rootSpan.setAttribute(MA.HTTP_STATUS_CODE, 200);
       rootSpan.setAttribute(MA.RESPONSE_ITEMS, withSparklineData.length);
+      rootSpan.setStatus({ code: SpanStatusCode.OK });
       return NextResponse.json({ data: withSparklineData, total, limit, offset, hasMore });
     } catch (error) {
       return await handleRouteError(error, rootSpan);
+    } finally {
+      rootSpan.end();
     }
   });
 }

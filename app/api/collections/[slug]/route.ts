@@ -13,6 +13,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { collections } from "@/app/lib/data/collections";
 import { ensurePriceEngine } from "@/app/lib/price-engine";
 import { simulateLatency, simulateDbLatency } from "@/app/lib/utils";
+import { SpanStatusCode } from "@opentelemetry/api";
 import { apiTracer, dataTracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
 import { handleRouteError } from "@/app/lib/error-handler";
 import { maybeFault } from "@/app/lib/busybox";
@@ -27,10 +28,12 @@ export async function GET(
   ensurePriceEngine();
   const { slug } = await params;
 
-  return withSpan(apiTracer, 'marketplace.collection.detail', {
-    [MA.HTTP_METHOD]: 'GET',
-    [MA.HTTP_ROUTE]: '/api/collections/[slug]',
-    [MA.COLLECTION_SLUG]: slug,
+  return apiTracer.startActiveSpan('marketplace.collection.detail', {
+    attributes: {
+      [MA.HTTP_METHOD]: 'GET',
+      [MA.HTTP_ROUTE]: '/api/collections/[slug]',
+      [MA.COLLECTION_SLUG]: slug,
+    },
   }, async (rootSpan) => {
     try {
       maybeFault('http500', { route: '/api/collections/[slug]', slug });
@@ -65,9 +68,12 @@ export async function GET(
       rootSpan.setAttribute(MA.CHAIN, collection.chain);
       rootSpan.setAttribute(MA.HTTP_STATUS_CODE, 200);
       rootSpan.setAttribute(MA.RESPONSE_ITEMS, 1);
+      rootSpan.setStatus({ code: SpanStatusCode.OK });
       return NextResponse.json(collection);
     } catch (error) {
       return await handleRouteError(error, rootSpan);
+    } finally {
+      rootSpan.end();
     }
   });
 }

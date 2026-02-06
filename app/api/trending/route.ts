@@ -26,6 +26,7 @@ import { collections } from "@/app/lib/data/collections";
 import { tokens } from "@/app/lib/data/tokens";
 import { ensurePriceEngine, getSparklineData } from "@/app/lib/price-engine";
 import { simulateLatency, simulateDbLatency } from "@/app/lib/utils";
+import { SpanStatusCode } from "@opentelemetry/api";
 import { apiTracer, dataTracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
 import { handleRouteError } from "@/app/lib/error-handler";
 import { maybeFault } from "@/app/lib/busybox";
@@ -36,9 +37,11 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   ensurePriceEngine();
 
-  return withSpan(apiTracer, 'marketplace.trending.aggregate', {
-    [MA.HTTP_METHOD]: 'GET',
-    [MA.HTTP_ROUTE]: '/api/trending',
+  return apiTracer.startActiveSpan('marketplace.trending.aggregate', {
+    attributes: {
+      [MA.HTTP_METHOD]: 'GET',
+      [MA.HTTP_ROUTE]: '/api/trending',
+    },
   }, async (rootSpan) => {
     try {
       maybeFault('http500', { route: '/api/trending' });
@@ -105,9 +108,12 @@ export async function GET() {
       rootSpan.setAttribute(MA.RESULT_COUNT, featuredCollections.length + topCollections.length + trendingTokens.length);
       rootSpan.setAttribute(MA.HTTP_STATUS_CODE, 200);
       rootSpan.setAttribute(MA.RESPONSE_ITEMS, featuredCollections.length + topCollections.length + trendingTokens.length);
+      rootSpan.setStatus({ code: SpanStatusCode.OK });
       return NextResponse.json({ featuredCollections, trendingTokens, topCollections, marketplaceStats });
     } catch (error) {
       return await handleRouteError(error, rootSpan);
+    } finally {
+      rootSpan.end();
     }
   });
 }

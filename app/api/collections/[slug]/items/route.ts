@@ -16,6 +16,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { nftsByCollection } from "@/app/lib/data/collections";
 import { ensurePriceEngine } from "@/app/lib/price-engine";
 import { simulateLatency, simulateDbLatency } from "@/app/lib/utils";
+import { SpanStatusCode } from "@opentelemetry/api";
 import { apiTracer, dataTracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
 import { handleRouteError } from "@/app/lib/error-handler";
 import { maybeFault } from "@/app/lib/busybox";
@@ -35,11 +36,13 @@ export async function GET(
   const limit = Math.min(parseInt(searchParams.get("limit") || "20"), 100);
   const offset = parseInt(searchParams.get("offset") || "0");
 
-  return withSpan(apiTracer, 'marketplace.collection.items', {
-    [MA.HTTP_METHOD]: 'GET',
-    [MA.HTTP_ROUTE]: '/api/collections/[slug]/items',
-    [MA.COLLECTION_SLUG]: slug, [MA.FILTER_SORT]: sort, [MA.FILTER_STATUS]: status,
-    [MA.PAGINATION_LIMIT]: limit, [MA.PAGINATION_OFFSET]: offset,
+  return apiTracer.startActiveSpan('marketplace.collection.items', {
+    attributes: {
+      [MA.HTTP_METHOD]: 'GET',
+      [MA.HTTP_ROUTE]: '/api/collections/[slug]/items',
+      [MA.COLLECTION_SLUG]: slug, [MA.FILTER_SORT]: sort, [MA.FILTER_STATUS]: status,
+      [MA.PAGINATION_LIMIT]: limit, [MA.PAGINATION_OFFSET]: offset,
+    },
   }, async (rootSpan) => {
     try {
       maybeFault('http500', { route: '/api/collections/[slug]/items', slug });
@@ -110,9 +113,12 @@ export async function GET(
       rootSpan.setAttribute(MA.RESULT_COUNT, paginated.length);
       rootSpan.setAttribute(MA.HTTP_STATUS_CODE, 200);
       rootSpan.setAttribute(MA.RESPONSE_ITEMS, paginated.length);
+      rootSpan.setStatus({ code: SpanStatusCode.OK });
       return NextResponse.json({ data: paginated, total, limit, offset, hasMore });
     } catch (error) {
       return await handleRouteError(error, rootSpan);
+    } finally {
+      rootSpan.end();
     }
   });
 }

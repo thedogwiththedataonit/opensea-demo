@@ -16,6 +16,7 @@ import { tokens } from "@/app/lib/data/tokens";
 import { ensurePriceEngine } from "@/app/lib/price-engine";
 import { simulateLatency, simulateDbLatency } from "@/app/lib/utils";
 import { SearchResult } from "@/app/lib/data/types";
+import { SpanStatusCode } from "@opentelemetry/api";
 import { apiTracer, searchTracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
 import { handleRouteError } from "@/app/lib/error-handler";
 import { maybeFault } from "@/app/lib/busybox";
@@ -27,10 +28,12 @@ export async function GET(request: NextRequest) {
 
   const q = request.nextUrl.searchParams.get("q")?.toLowerCase() || "";
 
-  return withSpan(apiTracer, 'marketplace.search', {
-    [MA.HTTP_METHOD]: 'GET',
-    [MA.HTTP_ROUTE]: '/api/search',
-    [MA.SEARCH_QUERY]: q,
+  return apiTracer.startActiveSpan('marketplace.search', {
+    attributes: {
+      [MA.HTTP_METHOD]: 'GET',
+      [MA.HTTP_ROUTE]: '/api/search',
+      [MA.SEARCH_QUERY]: q,
+    },
   }, async (rootSpan) => {
     try {
       maybeFault('http500', { route: '/api/search', query: q });
@@ -85,9 +88,12 @@ export async function GET(request: NextRequest) {
       rootSpan.setAttribute(MA.HTTP_STATUS_CODE, 200);
       rootSpan.setAttribute(MA.RESPONSE_ITEMS, totalHits);
 
+      rootSpan.setStatus({ code: SpanStatusCode.OK });
       return NextResponse.json({ collections: matchedCollections, tokens: matchedTokens } as SearchResult);
     } catch (error) {
       return await handleRouteError(error, rootSpan);
+    } finally {
+      rootSpan.end();
     }
   });
 }

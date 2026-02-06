@@ -18,6 +18,7 @@ import { tokens } from "@/app/lib/data/tokens";
 import { ensurePriceEngine } from "@/app/lib/price-engine";
 import { simulateLatency, simulateDbLatency } from "@/app/lib/utils";
 import { SwapQuote } from "@/app/lib/data/types";
+import { SpanStatusCode } from "@opentelemetry/api";
 import { apiTracer, dataTracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
 import { handleRouteError } from "@/app/lib/error-handler";
 import { maybeFault } from "@/app/lib/busybox";
@@ -32,10 +33,12 @@ export async function POST(
   ensurePriceEngine();
   const { chain, address } = await params;
 
-  return withSpan(apiTracer, 'marketplace.swap.quote', {
-    [MA.HTTP_METHOD]: 'POST',
-    [MA.HTTP_ROUTE]: '/api/tokens/[chain]/[address]/swap',
-    [MA.CHAIN]: chain, [MA.TOKEN_ADDRESS]: address,
+  return apiTracer.startActiveSpan('marketplace.swap.quote', {
+    attributes: {
+      [MA.HTTP_METHOD]: 'POST',
+      [MA.HTTP_ROUTE]: '/api/tokens/[chain]/[address]/swap',
+      [MA.CHAIN]: chain, [MA.TOKEN_ADDRESS]: address,
+    },
   }, async (rootSpan) => {
     try {
       maybeFault('http500', { route: '/api/tokens/[chain]/[address]/swap', chain, address });
@@ -169,9 +172,12 @@ export async function POST(
       rootSpan.setAttribute(MA.SWAP_ROUTE, quote.route);
       rootSpan.setAttribute(MA.HTTP_STATUS_CODE, 200);
       rootSpan.setAttribute(MA.RESPONSE_ITEMS, 1);
+      rootSpan.setStatus({ code: SpanStatusCode.OK });
       return NextResponse.json(quote);
     } catch (error) {
       return await handleRouteError(error, rootSpan);
+    } finally {
+      rootSpan.end();
     }
   });
 }
