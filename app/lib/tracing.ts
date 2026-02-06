@@ -487,73 +487,21 @@ export function recordEdgeHeaders(span: Span, headers: Headers): void {
   const region = headers.get('x-edge-region');
   const requestId = headers.get('x-edge-request-id');
   const startTime = headers.get('x-edge-start-time');
-  const edgeTraceId = headers.get('x-edge-trace-id');
-  const edgeSpanId = headers.get('x-edge-span-id');
+  const chaos = headers.get('x-edge-chaos');
 
   if (region) span.setAttribute(MA.EDGE_REGION, region);
   if (requestId) span.setAttribute(MA.EDGE_REQUEST_ID, requestId);
+  if (chaos) span.setAttribute('marketplace.edge.chaos_enabled', chaos === 'true');
   if (startTime) {
     const edgeLatency = Date.now() - parseInt(startTime);
     if (!isNaN(edgeLatency)) span.setAttribute(MA.EDGE_LATENCY_MS, edgeLatency);
   }
-  // Trace context propagated from edge middleware
-  if (edgeTraceId) span.setAttribute('marketplace.edge.trace_id', edgeTraceId);
-  if (edgeSpanId) span.setAttribute('marketplace.edge.span_id', edgeSpanId);
 }
 
 // ---------------------------------------------------------------------------
-// Synthetic Edge Middleware Span
+// Note: Edge Middleware spans are auto-instrumented by Next.js as
+// "Middleware.execute" spans. We do NOT create synthetic spans here —
+// that would break trace context propagation. The middleware's x-edge-*
+// headers are recorded as attributes on the route's root span via
+// recordEdgeHeaders() above.
 // ---------------------------------------------------------------------------
-
-/** Tracer for synthetic edge middleware spans */
-const edgeMwTracer = trace.getTracer('vercel-edge-middleware');
-
-/**
- * Creates a synthetic OTel span representing the Edge Middleware processing
- * that occurred before this Node.js route handler was invoked.
- *
- * The span uses timing data from x-edge-* headers to reconstruct the
- * middleware's actual duration. It appears as the first child span in the
- * trace waterfall, giving visibility into the edge layer.
- *
- * Call this inside the root span callback, before any route logic.
- * It creates and immediately ends a completed span (not async).
- */
-export function emitEdgeMiddlewareSpan(headers: Headers): void {
-  const region = headers.get('x-edge-region');
-  const requestId = headers.get('x-edge-request-id');
-  const startTimeStr = headers.get('x-edge-start-time');
-  const edgeTraceId = headers.get('x-edge-trace-id');
-  const edgeSpanId = headers.get('x-edge-span-id');
-  const chaos = headers.get('x-edge-chaos');
-
-  if (!startTimeStr) return; // No edge headers — skip
-
-  const edgeStartMs = parseInt(startTimeStr);
-  if (isNaN(edgeStartMs)) return;
-
-  // Calculate edge middleware duration (time between edge start and now-ish)
-  // This is approximate — the actual edge duration was small, the rest is network transit
-  const edgeDurationMs = Math.max(Date.now() - edgeStartMs, 1);
-
-  // Create a span with explicit start time so it aligns in the trace waterfall
-  const span = edgeMwTracer.startSpan('middleware.edge.request', {
-    startTime: new Date(edgeStartMs),
-    attributes: {
-      'peer.service': 'vercel-edge-middleware',
-      'service.name': 'vercel-edge-middleware',
-      [MA.EDGE_REGION]: region || 'unknown',
-      [MA.EDGE_REQUEST_ID]: requestId || 'unknown',
-      [MA.EDGE_LATENCY_MS]: edgeDurationMs,
-      'edge.trace_id': edgeTraceId || '',
-      'edge.span_id': edgeSpanId || '',
-      'edge.chaos_enabled': chaos === 'true',
-      'edge.runtime': 'edge',
-      'span.type': 'web',
-      'component': 'edge-middleware',
-    },
-  });
-
-  span.setStatus({ code: SpanStatusCode.OK });
-  span.end(new Date(edgeStartMs + Math.min(edgeDurationMs, 50))); // End at edge finish time
-}

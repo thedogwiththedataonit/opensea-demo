@@ -19,7 +19,7 @@ import { ensurePriceEngine } from "@/app/lib/price-engine";
 import { simulateLatency, simulateDbLatency, maybeServiceTimeout } from "@/app/lib/utils";
 import { SwapQuote } from "@/app/lib/data/types";
 import { SpanStatusCode } from "@opentelemetry/api";
-import { apiTracer, mongoTracer, chainlinkTracer, uniswapTracer, gasTracer, withSpan, MarketplaceAttributes as MA, recordEdgeHeaders, tagSpanService, emitEdgeMiddlewareSpan } from "@/app/lib/tracing";
+import { apiTracer, mongoTracer, chainlinkTracer, uniswapTracer, gasTracer, withSpan, MarketplaceAttributes as MA, recordEdgeHeaders, tagSpanService } from "@/app/lib/tracing";
 import { handleRouteError } from "@/app/lib/error-handler";
 import { maybeFault } from "@/app/lib/busybox";
 import { ValidationError, NotFoundError, UnprocessableError } from "@/app/lib/errors";
@@ -42,7 +42,6 @@ export async function POST(
     },
   }, async (rootSpan) => {
     tagSpanService(rootSpan, 'opensea-api-gateway');
-    emitEdgeMiddlewareSpan(request.headers);
     recordEdgeHeaders(rootSpan, request.headers);
     const _start = Date.now();
     log.info('api-gateway', 'POST /api/tokens/[chain]/[address]/swap', { chain, address });

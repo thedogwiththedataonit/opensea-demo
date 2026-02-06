@@ -17,7 +17,7 @@ import { tokens } from "@/app/lib/data/tokens";
 import { ensurePriceEngine } from "@/app/lib/price-engine";
 import { simulateLatency, simulateDbLatency } from "@/app/lib/utils";
 import { SpanStatusCode } from "@opentelemetry/api";
-import { apiTracer, mongoTracer, alchemyTracer, withSpan, MarketplaceAttributes as MA, recordEdgeHeaders, tagSpanService, emitEdgeMiddlewareSpan } from "@/app/lib/tracing";
+import { apiTracer, mongoTracer, alchemyTracer, withSpan, MarketplaceAttributes as MA, recordEdgeHeaders, tagSpanService } from "@/app/lib/tracing";
 import { handleRouteError } from "@/app/lib/error-handler";
 import { maybeFault } from "@/app/lib/busybox";
 import { NotFoundError } from "@/app/lib/errors";
@@ -88,7 +88,6 @@ export async function GET(
     },
   }, async (rootSpan) => {
     tagSpanService(rootSpan, 'opensea-api-gateway');
-    emitEdgeMiddlewareSpan(request.headers);
     recordEdgeHeaders(rootSpan, request.headers);
     const _start = Date.now();
     log.info('api-gateway', 'GET /api/tokens/[chain]/[address]', { chain, address });
