@@ -3,7 +3,8 @@
  *
  * Converts thrown errors (MarketplaceError subclasses or unexpected exceptions)
  * into structured JSON responses with full error metadata. Also records error
- * details on the active OpenTelemetry span for trace-level observability.
+ * details on the active OpenTelemetry span and creates a dedicated error child
+ * span with stack trace and custom duration for trace-level observability.
  *
  * Every API route wraps its body in a try/catch that calls handleRouteError()
  * in the catch branch, producing consistent error responses across all endpoints.
@@ -12,6 +13,7 @@
 import { NextResponse } from "next/server";
 import { Span, SpanStatusCode } from "@opentelemetry/api";
 import { MarketplaceError } from "./errors";
+import { apiTracer, withErrorSpan, MarketplaceAttributes as MA } from "./tracing";
 
 // ---------------------------------------------------------------------------
 // Response Types
@@ -69,11 +71,13 @@ function generateRequestId(): string {
  *  - Generates a unique requestId for log correlation
  *  - Includes the stack trace in the response body
  *  - Sets SpanStatusCode.ERROR on the span
+ *  - Creates a dedicated `marketplace.error.response_builder` child span
+ *    with its own duration and stack trace for trace visibility
  *
  * @param error - The caught error (may be MarketplaceError or unknown)
  * @param span  - The active OTel span to record error metadata on
  */
-export function handleRouteError(error: unknown, span: Span): NextResponse<ApiErrorResponse> {
+export async function handleRouteError(error: unknown, span: Span): Promise<NextResponse<ApiErrorResponse>> {
   const requestId = generateRequestId();
   const timestamp = new Date().toISOString();
 
@@ -84,14 +88,21 @@ export function handleRouteError(error: unknown, span: Span): NextResponse<ApiEr
       message: `${error.code}: ${error.message}`,
     });
     span.setAttribute('error', true);
-    span.setAttribute('error.code', error.code);
-    span.setAttribute('error.status_code', error.statusCode);
-    span.setAttribute('error.type', error.name);
-    span.setAttribute('error.request_id', requestId);
+    span.setAttribute(MA.ERROR_CODE, error.code);
+    span.setAttribute(MA.ERROR_STATUS_CODE, error.statusCode);
+    span.setAttribute(MA.ERROR_TYPE, error.name);
+    span.setAttribute(MA.ERROR_REQUEST_ID, requestId);
+    span.setAttribute(MA.HTTP_STATUS_CODE, error.statusCode);
     if (error.context) {
-      span.setAttribute('error.context', JSON.stringify(error.context));
+      span.setAttribute(MA.ERROR_CONTEXT, JSON.stringify(error.context));
     }
     span.recordException(error);
+
+    // Create a dedicated error response builder span
+    await withErrorSpan(apiTracer, error, {
+      [MA.ERROR_REQUEST_ID]: requestId,
+      [MA.ERROR_ORIGIN_SPAN]: 'route_handler',
+    });
 
     const response: ApiErrorResponse = {
       error: {
@@ -117,13 +128,20 @@ export function handleRouteError(error: unknown, span: Span): NextResponse<ApiEr
     message: `INTERNAL_ERROR: ${message}`,
   });
   span.setAttribute('error', true);
-  span.setAttribute('error.code', 'INTERNAL_ERROR');
-  span.setAttribute('error.status_code', 500);
-  span.setAttribute('error.type', 'UnknownError');
-  span.setAttribute('error.request_id', requestId);
+  span.setAttribute(MA.ERROR_CODE, 'INTERNAL_ERROR');
+  span.setAttribute(MA.ERROR_STATUS_CODE, 500);
+  span.setAttribute(MA.ERROR_TYPE, 'UnknownError');
+  span.setAttribute(MA.ERROR_REQUEST_ID, requestId);
+  span.setAttribute(MA.HTTP_STATUS_CODE, 500);
   if (error instanceof Error) {
     span.recordException(error);
   }
+
+  // Create a dedicated error response builder span
+  await withErrorSpan(apiTracer, error, {
+    [MA.ERROR_REQUEST_ID]: requestId,
+    [MA.ERROR_ORIGIN_SPAN]: 'route_handler',
+  });
 
   const response: ApiErrorResponse = {
     error: {

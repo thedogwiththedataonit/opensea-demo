@@ -3,15 +3,17 @@
  *
  * Single collection detail by slug.
  *
- * Status codes: 200, 404, 500, 503, 429
- * Error codes: COLLECTION_NOT_FOUND, COLLECTION_LOOKUP_FAILED, BUSYBOX_*
+ * Trace structure:
+ *   marketplace.collection.detail (opensea-api-gateway)
+ *     ├── marketplace.infra.latency_simulation
+ *     └── marketplace.collection.lookup (opensea-data-service)
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { collections } from "@/app/lib/data/collections";
 import { ensurePriceEngine } from "@/app/lib/price-engine";
-import { simulateLatency } from "@/app/lib/utils";
-import { tracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
+import { simulateLatency, simulateDbLatency } from "@/app/lib/utils";
+import { apiTracer, dataTracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
 import { handleRouteError } from "@/app/lib/error-handler";
 import { maybeFault } from "@/app/lib/busybox";
 import { NotFoundError } from "@/app/lib/errors";
@@ -25,7 +27,11 @@ export async function GET(
   ensurePriceEngine();
   const { slug } = await params;
 
-  return withSpan(tracer, 'marketplace.collection.detail', { [MA.COLLECTION_SLUG]: slug }, async (rootSpan) => {
+  return withSpan(apiTracer, 'marketplace.collection.detail', {
+    [MA.HTTP_METHOD]: 'GET',
+    [MA.HTTP_ROUTE]: '/api/collections/[slug]',
+    [MA.COLLECTION_SLUG]: slug,
+  }, async (rootSpan) => {
     try {
       maybeFault('http500', { route: '/api/collections/[slug]', slug });
       maybeFault('http502', { route: '/api/collections/[slug]' });
@@ -34,7 +40,14 @@ export async function GET(
 
       await simulateLatency(20, 60);
 
-      const collection = await withSpan(tracer, 'marketplace.collection.lookup', { [MA.COLLECTION_SLUG]: slug }, async (span) => {
+      const collection = await withSpan(dataTracer, 'marketplace.collection.lookup', {
+        [MA.COLLECTION_SLUG]: slug,
+        [MA.DB_OPERATION]: 'read',
+        [MA.DB_COLLECTION]: 'collections',
+        [MA.DATA_SOURCE]: 'in-memory',
+      }, async (span) => {
+        const delayMs = await simulateDbLatency('db_read');
+        span.setAttribute(MA.DB_DURATION_MS, delayMs);
         const found = collections.find((c) => c.slug === slug);
         if (found) {
           span.setAttribute(MA.COLLECTION_NAME, found.name);
@@ -50,9 +63,11 @@ export async function GET(
 
       rootSpan.setAttribute(MA.COLLECTION_NAME, collection.name);
       rootSpan.setAttribute(MA.CHAIN, collection.chain);
+      rootSpan.setAttribute(MA.HTTP_STATUS_CODE, 200);
+      rootSpan.setAttribute(MA.RESPONSE_ITEMS, 1);
       return NextResponse.json(collection);
     } catch (error) {
-      return handleRouteError(error, rootSpan);
+      return await handleRouteError(error, rootSpan);
     }
   });
 }

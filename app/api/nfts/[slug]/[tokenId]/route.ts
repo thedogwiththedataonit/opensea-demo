@@ -3,22 +3,19 @@
  *
  * Single NFT detail with traits, activity, comments, and on-chain metadata.
  *
- * Status codes: 200, 404, 500, 503, 429
- * Error codes: COLLECTION_NOT_FOUND, NFT_NOT_FOUND, NFT_LOOKUP_FAILED, BUSYBOX_*
- *
  * Trace structure:
- *   marketplace.nft.detail
+ *   marketplace.nft.detail (opensea-api-gateway)
  *     ├── marketplace.infra.latency_simulation
- *     ├── marketplace.nft.collection_lookup
- *     ├── marketplace.nft.token_lookup
- *     └── marketplace.nft.comments_generation
+ *     ├── marketplace.nft.collection_lookup (opensea-data-service)
+ *     ├── marketplace.nft.token_lookup (opensea-data-service)
+ *     └── marketplace.nft.comments_generation (opensea-enrichment)
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { nftsByCollection } from "@/app/lib/data/collections";
 import { ensurePriceEngine } from "@/app/lib/price-engine";
-import { simulateLatency } from "@/app/lib/utils";
-import { tracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
+import { simulateLatency, simulateDbLatency } from "@/app/lib/utils";
+import { apiTracer, dataTracer, enrichTracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
 import { handleRouteError } from "@/app/lib/error-handler";
 import { maybeFault } from "@/app/lib/busybox";
 import { NotFoundError } from "@/app/lib/errors";
@@ -80,7 +77,11 @@ export async function GET(
   ensurePriceEngine();
   const { slug, tokenId } = await params;
 
-  return withSpan(tracer, 'marketplace.nft.detail', { [MA.COLLECTION_SLUG]: slug, [MA.NFT_TOKEN_ID]: tokenId }, async (rootSpan) => {
+  return withSpan(apiTracer, 'marketplace.nft.detail', {
+    [MA.HTTP_METHOD]: 'GET',
+    [MA.HTTP_ROUTE]: '/api/nfts/[slug]/[tokenId]',
+    [MA.COLLECTION_SLUG]: slug, [MA.NFT_TOKEN_ID]: tokenId,
+  }, async (rootSpan) => {
     try {
       maybeFault('http500', { route: '/api/nfts/[slug]/[tokenId]', slug, tokenId });
       maybeFault('http502', { route: '/api/nfts/[slug]/[tokenId]' });
@@ -89,7 +90,12 @@ export async function GET(
 
       await simulateLatency(25, 70);
 
-      const nfts = await withSpan(tracer, 'marketplace.nft.collection_lookup', { [MA.COLLECTION_SLUG]: slug }, async (span) => {
+      const nfts = await withSpan(dataTracer, 'marketplace.nft.collection_lookup', {
+        [MA.COLLECTION_SLUG]: slug,
+        [MA.DB_OPERATION]: 'read', [MA.DB_COLLECTION]: 'nfts', [MA.DATA_SOURCE]: 'in-memory',
+      }, async (span) => {
+        const delayMs = await simulateDbLatency('db_read');
+        span.setAttribute(MA.DB_DURATION_MS, delayMs);
         const found = nftsByCollection[slug];
         span.setAttribute(MA.RESULT_COUNT, found ? found.length : 0);
         return found;
@@ -99,7 +105,12 @@ export async function GET(
         throw new NotFoundError('COLLECTION_NOT_FOUND', `Collection "${slug}" not found`, { slug });
       }
 
-      const nft = await withSpan(tracer, 'marketplace.nft.token_lookup', { [MA.COLLECTION_SLUG]: slug, [MA.NFT_TOKEN_ID]: tokenId }, async (span) => {
+      const nft = await withSpan(dataTracer, 'marketplace.nft.token_lookup', {
+        [MA.COLLECTION_SLUG]: slug, [MA.NFT_TOKEN_ID]: tokenId,
+        [MA.DB_OPERATION]: 'read', [MA.DB_COLLECTION]: 'nfts', [MA.DATA_SOURCE]: 'in-memory',
+      }, async (span) => {
+        const delayMs = await simulateDbLatency('db_read');
+        span.setAttribute(MA.DB_DURATION_MS, delayMs);
         const found = nfts.find((n) => n.tokenId === tokenId);
         if (found) {
           span.setAttribute(MA.NFT_IS_LISTED, found.isListed);
@@ -116,7 +127,13 @@ export async function GET(
       }
 
       // Generate dynamic comments via faker.js
-      const comments = await withSpan(tracer, 'marketplace.nft.comments_generation', { [MA.COLLECTION_SLUG]: slug, [MA.NFT_TOKEN_ID]: tokenId }, async (span) => {
+      const comments = await withSpan(enrichTracer, 'marketplace.nft.comments_generation', {
+        [MA.COLLECTION_SLUG]: slug, [MA.NFT_TOKEN_ID]: tokenId,
+        [MA.ENRICHMENT_SOURCE]: 'faker', [MA.DB_OPERATION]: 'read',
+        [MA.DB_COLLECTION]: 'comments', [MA.DATA_SOURCE]: 'social_index',
+      }, async (span) => {
+        const delayMs = await simulateDbLatency('db_read');
+        span.setAttribute(MA.DB_DURATION_MS, delayMs);
         const generated = generateComments(slug, tokenId);
         span.setAttribute(MA.RESULT_COUNT, generated.length);
         return generated;
@@ -124,9 +141,11 @@ export async function GET(
 
       rootSpan.setAttribute(MA.NFT_IS_LISTED, nft.isListed);
       rootSpan.setAttribute(MA.CHAIN, nft.chain);
+      rootSpan.setAttribute(MA.HTTP_STATUS_CODE, 200);
+      rootSpan.setAttribute(MA.RESPONSE_ITEMS, 1);
       return NextResponse.json({ ...nft, comments });
     } catch (error) {
-      return handleRouteError(error, rootSpan);
+      return await handleRouteError(error, rootSpan);
     }
   });
 }

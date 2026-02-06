@@ -6,8 +6,44 @@
  * integrated with the busybox chaos engine for timeout fault injection.
  */
 
-import { tracer, MarketplaceAttributes as MA } from './tracing';
+import { apiTracer, MarketplaceAttributes as MA } from './tracing';
 import { shouldInjectFault } from './busybox';
+
+// ---------------------------------------------------------------------------
+// DB Latency Profiles
+// ---------------------------------------------------------------------------
+
+/** Delay profiles simulating different I/O operations */
+export type LatencyProfile = 'cache_hit' | 'db_read' | 'db_write' | 'db_aggregate' | 'external_api' | 'enrichment';
+
+const LATENCY_RANGES: Record<LatencyProfile, [number, number]> = {
+  cache_hit:    [1, 5],
+  db_read:      [8, 30],
+  db_write:     [15, 45],
+  db_aggregate: [20, 60],
+  external_api: [50, 200],
+  enrichment:   [5, 20],
+};
+
+/**
+ * Simulate sub-operation I/O latency.
+ *
+ * Adds a short delay to make sub-spans look realistic in trace waterfalls.
+ * Returns the actual delay applied (useful for setting DB_DURATION_MS attribute).
+ *
+ * @param profile - Which latency profile to use
+ * @returns The delay in milliseconds that was applied
+ */
+export async function simulateDbLatency(profile: LatencyProfile): Promise<number> {
+  const [min, max] = LATENCY_RANGES[profile];
+  const delay = Math.round(min + Math.random() * (max - min));
+  await new Promise((resolve) => setTimeout(resolve, delay));
+  return delay;
+}
+
+// ---------------------------------------------------------------------------
+// Network Latency Simulation (Top-Level)
+// ---------------------------------------------------------------------------
 
 /**
  * Simulate network/processing latency for realistic tracing.
@@ -26,7 +62,7 @@ export async function simulateLatency(min: number = 20, max: number = 80): Promi
     ? Math.round(3000 + Math.random() * 5000)  // 3-8 seconds under chaos
     : Math.round(min + Math.random() * (max - min));
 
-  return tracer.startActiveSpan(
+  return apiTracer.startActiveSpan(
     'marketplace.infra.latency_simulation',
     {
       attributes: {
@@ -34,6 +70,7 @@ export async function simulateLatency(min: number = 20, max: number = 80): Promi
         [MA.INFRA_LATENCY_MAX_MS]: isTimeout ? 8000 : max,
         [MA.INFRA_LATENCY_MS]: delay,
         [MA.BUSYBOX_INJECTED]: isTimeout,
+        [MA.DATA_SOURCE]: 'network',
       },
     },
     async (span) => {
@@ -45,6 +82,10 @@ export async function simulateLatency(min: number = 20, max: number = 80): Promi
     }
   );
 }
+
+// ---------------------------------------------------------------------------
+// Formatting Helpers (no spans needed — pure functions)
+// ---------------------------------------------------------------------------
 
 /**
  * Format a number as a compact currency string.

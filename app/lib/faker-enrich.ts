@@ -1,17 +1,16 @@
 /**
- * Server-side faker.js enrichment utilities.
+ * Server-side faker.js enrichment utilities — fully instrumented with OTel.
  *
  * These functions simulate a live database by adding small random fluctuations
- * to collection / token data on each API request. They also generate dynamic
- * marketplace metadata (ETH price, gas, recent buyers, etc.) that would
- * normally come from on-chain data sources.
- *
- * All values are wrapped conceptually as "dynamic db call" results —
- * the frontend should render them inside <span className="dynamic-data"> tags.
+ * to collection / token data on each API request. Each function is wrapped in
+ * an OpenTelemetry span under the `opensea-enrichment` tracer with simulated
+ * I/O delays to produce realistic trace waterfalls.
  */
 
 import { faker } from "@faker-js/faker";
 import { Collection } from "./data/types";
+import { enrichTracer, withSpan, MarketplaceAttributes as MA } from "./tracing";
+import { simulateDbLatency } from "./utils";
 
 // ---- Price / stat fluctuation helpers ----
 
@@ -22,18 +21,30 @@ export function fluctuate(value: number, maxPct: number = 0.5): number {
 }
 
 /** Apply fluctuations to a collection to simulate live db data */
-export function enrichCollection(c: Collection): Collection & { recentBuyers: string[] } {
-  faker.seed(undefined); // unseed for true randomness each call
-  return {
-    ...c,
-    floorPrice: fluctuate(c.floorPrice, 2),
-    totalVolume: Math.round(fluctuate(c.totalVolume, 0.3)),
-    ownerCount: Math.round(fluctuate(c.ownerCount, 0.1)),
-    change1d: fluctuate(c.change1d, 5),
-    change7d: fluctuate(c.change7d, 3),
-    listedPct: parseFloat(fluctuate(c.listedPct, 1).toFixed(1)),
-    recentBuyers: generateRecentBuyers(c.slug, 3),
-  };
+export async function enrichCollection(c: Collection): Promise<Collection & { recentBuyers: string[] }> {
+  return withSpan(enrichTracer, 'marketplace.enrichment.collection', {
+    [MA.ENRICHMENT_SOURCE]: 'faker',
+    [MA.ENRICHMENT_FIELDS]: 6,
+    [MA.COLLECTION_SLUG]: c.slug,
+    [MA.DATA_SOURCE]: 'faker',
+  }, async (span) => {
+    const delayMs = await simulateDbLatency('enrichment');
+    span.setAttribute(MA.DB_DURATION_MS, delayMs);
+
+    faker.seed(undefined);
+    const result = {
+      ...c,
+      floorPrice: fluctuate(c.floorPrice, 2),
+      totalVolume: Math.round(fluctuate(c.totalVolume, 0.3)),
+      ownerCount: Math.round(fluctuate(c.ownerCount, 0.1)),
+      change1d: fluctuate(c.change1d, 5),
+      change7d: fluctuate(c.change7d, 3),
+      listedPct: parseFloat(fluctuate(c.listedPct, 1).toFixed(1)),
+      recentBuyers: generateRecentBuyers(c.slug, 3),
+    };
+    span.setAttribute(MA.RESULT_COUNT, 1);
+    return result;
+  });
 }
 
 /** Generate a set of fake recent buyer wallet/ENS names */
@@ -61,14 +72,26 @@ export interface MarketplaceStats {
 }
 
 /** Generate dynamic marketplace stats (ETH price, gas, etc.) */
-export function generateMarketplaceStats(): MarketplaceStats {
-  faker.seed(undefined);
-  return {
-    ethPrice: fluctuate(1879.47, 0.3),
-    gasPrice: fluctuate(16.48, 8),
-    totalUsers: Math.round(fluctuate(2_400_000, 0.05)),
-    activeListings: Math.round(fluctuate(185_000, 0.5)),
-  };
+export async function generateMarketplaceStats(): Promise<MarketplaceStats> {
+  return withSpan(enrichTracer, 'marketplace.enrichment.marketplace_stats', {
+    [MA.ENRICHMENT_SOURCE]: 'faker',
+    [MA.DATA_SOURCE]: 'oracle',
+    [MA.ENRICHMENT_FIELDS]: 4,
+  }, async (span) => {
+    const delayMs = await simulateDbLatency('external_api');
+    span.setAttribute(MA.DB_DURATION_MS, delayMs);
+
+    faker.seed(undefined);
+    const stats = {
+      ethPrice: fluctuate(1879.47, 0.3),
+      gasPrice: fluctuate(16.48, 8),
+      totalUsers: Math.round(fluctuate(2_400_000, 0.05)),
+      activeListings: Math.round(fluctuate(185_000, 0.5)),
+    };
+    span.setAttribute('marketplace.stats.eth_price', stats.ethPrice);
+    span.setAttribute('marketplace.stats.gas_price', stats.gasPrice);
+    return stats;
+  });
 }
 
 // ---- Token enrichment ----
@@ -84,19 +107,30 @@ export interface EnrichedTokenFields {
 }
 
 /** Apply price fluctuations to a token to simulate live market data */
-export function enrichTokenFields(t: EnrichedTokenFields): EnrichedTokenFields {
-  faker.seed(undefined);
-  const newPrice = fluctuate(t.price, 1.5);
-  const priceRatio = newPrice / t.price;
-  return {
-    price: newPrice,
-    fdv: Math.round(t.fdv * priceRatio),
-    volume1d: Math.round(fluctuate(t.volume1d, 3)),
-    volume7d: Math.round(fluctuate(t.volume7d, 1)),
-    change1h: fluctuate(t.change1h, 10),
-    change1d: fluctuate(t.change1d, 5),
-    change30d: fluctuate(t.change30d, 2),
-  };
+export async function enrichTokenFields(t: EnrichedTokenFields): Promise<EnrichedTokenFields> {
+  return withSpan(enrichTracer, 'marketplace.enrichment.token', {
+    [MA.ENRICHMENT_SOURCE]: 'faker',
+    [MA.ENRICHMENT_FIELDS]: 7,
+    [MA.DATA_SOURCE]: 'faker',
+  }, async (span) => {
+    const delayMs = await simulateDbLatency('enrichment');
+    span.setAttribute(MA.DB_DURATION_MS, delayMs);
+
+    faker.seed(undefined);
+    const newPrice = fluctuate(t.price, 1.5);
+    const priceRatio = newPrice / t.price;
+    const result = {
+      price: newPrice,
+      fdv: Math.round(t.fdv * priceRatio),
+      volume1d: Math.round(fluctuate(t.volume1d, 3)),
+      volume7d: Math.round(fluctuate(t.volume7d, 1)),
+      change1h: fluctuate(t.change1h, 10),
+      change1d: fluctuate(t.change1d, 5),
+      change30d: fluctuate(t.change30d, 2),
+    };
+    span.setAttribute(MA.TOKEN_PRICE_USD, result.price);
+    return result;
+  });
 }
 
 // ---- Recent transactions generator for token detail ----
@@ -112,28 +146,40 @@ export interface RecentTransaction {
   timestamp: number;
 }
 
-export function generateRecentTransactions(symbol: string, price: number, count: number = 5): RecentTransaction[] {
-  faker.seed(undefined);
-  const now = Date.now();
-  const txns: RecentTransaction[] = [];
+export async function generateRecentTransactions(symbol: string, price: number, count: number = 5): Promise<RecentTransaction[]> {
+  return withSpan(enrichTracer, 'marketplace.enrichment.transactions', {
+    [MA.ENRICHMENT_SOURCE]: 'faker',
+    [MA.DATA_SOURCE]: 'blockchain_index',
+    [MA.TOKEN_SYMBOL]: symbol,
+    [MA.DB_OPERATION]: 'read',
+  }, async (span) => {
+    const delayMs = await simulateDbLatency('db_read');
+    span.setAttribute(MA.DB_DURATION_MS, delayMs);
 
-  for (let i = 0; i < count; i++) {
-    const type = faker.helpers.arrayElement(["buy", "sell", "transfer"] as const);
-    const amount = faker.number.float({ min: 10, max: 500000, fractionDigits: 2 });
-    const fromRoll = faker.number.int({ min: 0, max: 100 });
-    const toRoll = faker.number.int({ min: 0, max: 100 });
+    faker.seed(undefined);
+    const now = Date.now();
+    const txns: RecentTransaction[] = [];
 
-    txns.push({
-      hash: `0x${faker.string.hexadecimal({ length: 64, casing: "lower", prefix: "" })}`,
-      type,
-      from: fromRoll < 30 ? `${faker.internet.username().toLowerCase()}.eth` : (() => { const a = faker.finance.ethereumAddress(); return `${a.slice(0, 6)}...${a.slice(-4)}`; })(),
-      to: toRoll < 30 ? `${faker.internet.username().toLowerCase()}.eth` : (() => { const a = faker.finance.ethereumAddress(); return `${a.slice(0, 6)}...${a.slice(-4)}`; })(),
-      amount,
-      tokenSymbol: symbol,
-      valueUsd: amount * price,
-      timestamp: now - faker.number.int({ min: 60000, max: 3600000 * 4 }),
-    });
-  }
+    for (let i = 0; i < count; i++) {
+      const type = faker.helpers.arrayElement(["buy", "sell", "transfer"] as const);
+      const amount = faker.number.float({ min: 10, max: 500000, fractionDigits: 2 });
+      const fromRoll = faker.number.int({ min: 0, max: 100 });
+      const toRoll = faker.number.int({ min: 0, max: 100 });
 
-  return txns.sort((a, b) => b.timestamp - a.timestamp);
+      txns.push({
+        hash: `0x${faker.string.hexadecimal({ length: 64, casing: "lower", prefix: "" })}`,
+        type,
+        from: fromRoll < 30 ? `${faker.internet.username().toLowerCase()}.eth` : (() => { const a = faker.finance.ethereumAddress(); return `${a.slice(0, 6)}...${a.slice(-4)}`; })(),
+        to: toRoll < 30 ? `${faker.internet.username().toLowerCase()}.eth` : (() => { const a = faker.finance.ethereumAddress(); return `${a.slice(0, 6)}...${a.slice(-4)}`; })(),
+        amount,
+        tokenSymbol: symbol,
+        valueUsd: amount * price,
+        timestamp: now - faker.number.int({ min: 60000, max: 3600000 * 4 }),
+      });
+    }
+
+    const sorted = txns.sort((a, b) => b.timestamp - a.timestamp);
+    span.setAttribute(MA.RESULT_COUNT, sorted.length);
+    return sorted;
+  });
 }

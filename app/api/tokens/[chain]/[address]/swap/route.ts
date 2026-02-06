@@ -3,27 +3,22 @@
  *
  * Mock swap quote with price impact, fees, gas, and routing.
  *
- * Status codes: 200, 400, 404, 422, 500, 503, 429
- * Error codes: INVALID_REQUEST_BODY, SWAP_VALIDATION_FAILED, TOKEN_NOT_FOUND,
- *   INSUFFICIENT_LIQUIDITY, PRICE_IMPACT_TOO_HIGH, SWAP_COMPUTATION_FAILED,
- *   LIQUIDITY_UNAVAILABLE, BUSYBOX_*
- *
  * Trace structure:
- *   marketplace.swap.quote
+ *   marketplace.swap.quote (opensea-api-gateway)
  *     ├── marketplace.infra.latency_simulation
- *     ├── marketplace.swap.validate_input
- *     ├── marketplace.swap.token_lookup
- *     ├── marketplace.swap.price_resolution
- *     ├── marketplace.swap.impact_calculation
- *     └── marketplace.swap.quote_assembly
+ *     ├── marketplace.swap.validate_input (opensea-api-gateway)
+ *     ├── marketplace.swap.token_lookup (opensea-data-service)
+ *     ├── marketplace.swap.price_resolution (opensea-data-service)
+ *     ├── marketplace.swap.impact_calculation (opensea-data-service)
+ *     └── marketplace.swap.quote_assembly (opensea-data-service)
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { tokens } from "@/app/lib/data/tokens";
 import { ensurePriceEngine } from "@/app/lib/price-engine";
-import { simulateLatency } from "@/app/lib/utils";
+import { simulateLatency, simulateDbLatency } from "@/app/lib/utils";
 import { SwapQuote } from "@/app/lib/data/types";
-import { tracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
+import { apiTracer, dataTracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
 import { handleRouteError } from "@/app/lib/error-handler";
 import { maybeFault } from "@/app/lib/busybox";
 import { ValidationError, NotFoundError, UnprocessableError } from "@/app/lib/errors";
@@ -37,7 +32,11 @@ export async function POST(
   ensurePriceEngine();
   const { chain, address } = await params;
 
-  return withSpan(tracer, 'marketplace.swap.quote', { [MA.CHAIN]: chain, [MA.TOKEN_ADDRESS]: address }, async (rootSpan) => {
+  return withSpan(apiTracer, 'marketplace.swap.quote', {
+    [MA.HTTP_METHOD]: 'POST',
+    [MA.HTTP_ROUTE]: '/api/tokens/[chain]/[address]/swap',
+    [MA.CHAIN]: chain, [MA.TOKEN_ADDRESS]: address,
+  }, async (rootSpan) => {
     try {
       maybeFault('http500', { route: '/api/tokens/[chain]/[address]/swap', chain, address });
       maybeFault('http502', { route: '/api/tokens/[chain]/[address]/swap' });
@@ -47,7 +46,12 @@ export async function POST(
       await simulateLatency(80, 200);
 
       // --- Validate request body ---
-      const validatedBody = await withSpan(tracer, 'marketplace.swap.validate_input', {}, async (span) => {
+      const validatedBody = await withSpan(apiTracer, 'marketplace.swap.validate_input', {
+        [MA.DB_OPERATION]: 'read',
+      }, async (span) => {
+        const delayMs = await simulateDbLatency('cache_hit');
+        span.setAttribute(MA.DB_DURATION_MS, delayMs);
+
         let body: { fromToken?: string; toToken?: string; amount?: number };
         try {
           body = await request.json();
@@ -74,7 +78,12 @@ export async function POST(
       rootSpan.setAttribute(MA.SWAP_FROM_AMOUNT, amount);
 
       // --- Look up target token ---
-      const targetToken = await withSpan(tracer, 'marketplace.swap.token_lookup', { [MA.CHAIN]: chain, [MA.TOKEN_ADDRESS]: address }, async (span) => {
+      const targetToken = await withSpan(dataTracer, 'marketplace.swap.token_lookup', {
+        [MA.CHAIN]: chain, [MA.TOKEN_ADDRESS]: address,
+        [MA.DB_OPERATION]: 'read', [MA.DB_COLLECTION]: 'tokens', [MA.DATA_SOURCE]: 'in-memory',
+      }, async (span) => {
+        const delayMs = await simulateDbLatency('db_read');
+        span.setAttribute(MA.DB_DURATION_MS, delayMs);
         const found = tokens.find((t) => t.chain === chain && t.address === address);
         if (found) {
           span.setAttribute(MA.TOKEN_SYMBOL, found.symbol);
@@ -92,9 +101,12 @@ export async function POST(
       maybeFault('http422', { route: '/api/tokens/[chain]/[address]/swap', token: targetToken.symbol });
 
       // --- Resolve prices ---
-      const { toPrice, fromValueUsd } = await withSpan(tracer, 'marketplace.swap.price_resolution', {
+      const { toPrice, fromValueUsd } = await withSpan(dataTracer, 'marketplace.swap.price_resolution', {
         [MA.SWAP_FROM_TOKEN]: fromToken, [MA.TOKEN_SYMBOL]: targetToken.symbol,
+        [MA.DB_OPERATION]: 'read', [MA.DATA_SOURCE]: 'oracle',
       }, async (span) => {
+        const delayMs = await simulateDbLatency('external_api');
+        span.setAttribute(MA.DB_DURATION_MS, delayMs);
         const from = fromToken === "SOL" ? 195.42 : fromToken === "ETH" ? 1879.47 : 1;
         const to = targetToken.price;
         const usd = amount * from;
@@ -107,7 +119,13 @@ export async function POST(
       rootSpan.setAttribute(MA.SWAP_AMOUNT_USD, fromValueUsd);
 
       // --- Compute price impact + fees ---
-      const { priceImpact, fee, toAmount } = await withSpan(tracer, 'marketplace.swap.impact_calculation', { [MA.SWAP_AMOUNT_USD]: fromValueUsd }, async (span) => {
+      const { priceImpact, fee, toAmount } = await withSpan(dataTracer, 'marketplace.swap.impact_calculation', {
+        [MA.SWAP_AMOUNT_USD]: fromValueUsd,
+        [MA.DB_OPERATION]: 'aggregate', [MA.DATA_SOURCE]: 'liquidity_pool',
+      }, async (span) => {
+        const delayMs = await simulateDbLatency('db_aggregate');
+        span.setAttribute(MA.DB_DURATION_MS, delayMs);
+
         const impact = Math.min(fromValueUsd / (targetToken.volume1d || 1) * 100, 50);
         const swapFee = fromValueUsd * 0.003;
         const effective = fromValueUsd - swapFee;
@@ -127,7 +145,12 @@ export async function POST(
       });
 
       // --- Assemble quote ---
-      const quote = await withSpan(tracer, 'marketplace.swap.quote_assembly', {}, async (span) => {
+      const quote = await withSpan(dataTracer, 'marketplace.swap.quote_assembly', {
+        [MA.DB_OPERATION]: 'read', [MA.DATA_SOURCE]: 'gas_oracle',
+      }, async (span) => {
+        const delayMs = await simulateDbLatency('cache_hit');
+        span.setAttribute(MA.DB_DURATION_MS, delayMs);
+
         const estimatedGas = 0.001 + Math.random() * 0.005;
         const route = `${fromToken} → ${targetToken.symbol}`;
         const q: SwapQuote = {
@@ -144,9 +167,11 @@ export async function POST(
       rootSpan.setAttribute(MA.SWAP_FEE_USD, quote.fee);
       rootSpan.setAttribute(MA.SWAP_TO_AMOUNT, quote.toAmount);
       rootSpan.setAttribute(MA.SWAP_ROUTE, quote.route);
+      rootSpan.setAttribute(MA.HTTP_STATUS_CODE, 200);
+      rootSpan.setAttribute(MA.RESPONSE_ITEMS, 1);
       return NextResponse.json(quote);
     } catch (error) {
-      return handleRouteError(error, rootSpan);
+      return await handleRouteError(error, rootSpan);
     }
   });
 }

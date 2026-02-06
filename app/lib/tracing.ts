@@ -2,33 +2,126 @@
  * OpenSea Marketplace — Tracing Utilities
  *
  * Centralized OpenTelemetry instrumentation module for the marketplace API.
- * Provides a pre-configured tracer, a typed span wrapper, and domain-specific
+ * Provides multiple service-scoped tracers (simulating a microservice architecture),
+ * typed span wrappers with automatic error span creation, and domain-specific
  * semantic attribute constants following the `marketplace.*` namespace convention.
  *
- * Usage in route handlers:
- *   import { tracer, withSpan, MarketplaceAttributes as MA } from '@/app/lib/tracing';
- *
- *   const result = await withSpan(tracer, 'marketplace.collection.lookup', {
- *     [MA.COLLECTION_SLUG]: slug,
- *   }, async (span) => {
- *     const collection = collections.find(c => c.slug === slug);
- *     span.setAttribute(MA.COLLECTION_NAME, collection.name);
- *     return collection;
- *   });
+ * Service tracers:
+ *   apiTracer        — opensea-api-gateway    (root HTTP handler spans)
+ *   dataTracer       — opensea-data-service   (data lookups, filters, sorts)
+ *   enrichTracer     — opensea-enrichment     (faker enrichment, comments, holders)
+ *   searchTracer     — opensea-search-engine  (search queries)
+ *   priceTracer      — opensea-price-engine   (sparkline / OHLC computations)
  */
 
 import { trace, Span, SpanStatusCode, Attributes } from '@opentelemetry/api';
 
 // ---------------------------------------------------------------------------
-// Tracer Instance
+// Service-Scoped Tracer Instances
+// ---------------------------------------------------------------------------
+
+/** @deprecated Use service-specific tracers below. Kept for backward compat. */
+export const tracer = trace.getTracer('opensea-marketplace');
+
+/** Root HTTP handler spans — API gateway layer */
+export const apiTracer = trace.getTracer('opensea-api-gateway');
+
+/** Data lookups, filtering, sorting, pagination */
+export const dataTracer = trace.getTracer('opensea-data-service');
+
+/** Faker enrichment, comments, holders, transactions generation */
+export const enrichTracer = trace.getTracer('opensea-enrichment');
+
+/** Search queries across collections and tokens */
+export const searchTracer = trace.getTracer('opensea-search-engine');
+
+/** Sparkline, OHLC, and price computation */
+export const priceTracer = trace.getTracer('opensea-price-engine');
+
+// ---------------------------------------------------------------------------
+// Error Span Name Mapping
+// ---------------------------------------------------------------------------
+
+const ERROR_SPAN_NAMES: Record<string, string> = {
+  NotFoundError: 'marketplace.error.not_found',
+  ValidationError: 'marketplace.error.validation',
+  InternalError: 'marketplace.error.internal',
+  RateLimitError: 'marketplace.error.rate_limited',
+  TimeoutError: 'marketplace.error.timeout',
+  BadGatewayError: 'marketplace.error.bad_gateway',
+  ServiceUnavailableError: 'marketplace.error.service_unavailable',
+  UnprocessableError: 'marketplace.error.unprocessable',
+  MarketplaceError: 'marketplace.error.marketplace',
+};
+
+function getErrorSpanName(error: unknown): string {
+  if (error instanceof Error && error.constructor.name in ERROR_SPAN_NAMES) {
+    return ERROR_SPAN_NAMES[error.constructor.name];
+  }
+  return 'marketplace.error.unknown';
+}
+
+// ---------------------------------------------------------------------------
+// Error Span Helper
 // ---------------------------------------------------------------------------
 
 /**
- * Shared tracer for all OpenSea marketplace operations.
- * The name 'opensea-marketplace' groups spans under a single instrumentation scope
- * in observability backends, making it easy to filter marketplace-specific traces.
+ * Creates a dedicated child span for error processing.
+ *
+ * Appears as its own red bar in trace waterfalls, making errors instantly
+ * visible. The span has a simulated duration (3-15ms) representing error
+ * logging, serialization, and metrics recording.
+ *
+ * @param t     - Tracer to create the span under
+ * @param error - The caught error
+ * @param attrs - Additional attributes (origin span, request ID, etc.)
  */
-export const tracer = trace.getTracer('opensea-marketplace');
+export async function withErrorSpan(
+  t: ReturnType<typeof trace.getTracer>,
+  error: unknown,
+  attrs: Attributes = {}
+): Promise<void> {
+  const spanName = getErrorSpanName(error);
+  const processingMs = Math.round(3 + Math.random() * 12); // 3-15ms
+
+  return t.startActiveSpan(spanName, { attributes: { ...attrs } }, async (span) => {
+    try {
+      // Set error status
+      span.setStatus({
+        code: SpanStatusCode.ERROR,
+        message: error instanceof Error ? error.message : 'Unknown error',
+      });
+
+      // Record exception (captures stack trace in OTel event)
+      if (error instanceof Error) {
+        span.recordException(error);
+      }
+
+      // Set rich error attributes
+      span.setAttribute('error', true);
+      span.setAttribute(MA.ERROR_PROCESSING_MS, processingMs);
+
+      if (error instanceof Error) {
+        span.setAttribute(MA.ERROR_MESSAGE, error.message);
+        span.setAttribute(MA.ERROR_TYPE, error.constructor.name);
+        if (error.stack) {
+          span.setAttribute(MA.ERROR_STACK_TRACE, error.stack);
+        }
+      }
+
+      // MarketplaceError-specific attributes
+      const me = error as { code?: string; statusCode?: number; context?: Record<string, unknown> };
+      if (me.code) span.setAttribute(MA.ERROR_CODE, me.code);
+      if (me.statusCode) span.setAttribute(MA.ERROR_STATUS_CODE, me.statusCode);
+      if (me.context) span.setAttribute(MA.ERROR_CONTEXT, JSON.stringify(me.context));
+
+      // Simulate error processing time
+      await new Promise((resolve) => setTimeout(resolve, processingMs));
+    } finally {
+      span.end();
+    }
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Span Wrapper
@@ -39,7 +132,8 @@ export const tracer = trace.getTracer('opensea-marketplace');
  *
  * - Creates a child span under the current active context
  * - Passes the span to the callback so attributes can be set mid-execution
- * - Automatically records exceptions and sets ERROR status on failure
+ * - On failure: sets ERROR status, records exception, creates a dedicated
+ *   error child span with its own duration and stack trace
  * - Ends the span in all cases (success or failure)
  *
  * @param t      - The tracer instance to create the span with
@@ -49,7 +143,7 @@ export const tracer = trace.getTracer('opensea-marketplace');
  * @returns      - The return value of the wrapped function
  */
 export async function withSpan<T>(
-  t: typeof tracer,
+  t: ReturnType<typeof trace.getTracer>,
   name: string,
   attrs: Attributes,
   fn: (span: Span) => Promise<T>
@@ -67,6 +161,8 @@ export async function withSpan<T>(
       if (error instanceof Error) {
         span.recordException(error);
       }
+      // Create a dedicated error child span with its own duration
+      await withErrorSpan(t, error, { [MA.ERROR_ORIGIN_SPAN]: name });
       throw error;
     } finally {
       span.end();
@@ -86,6 +182,18 @@ export async function withSpan<T>(
  * operations instantly identifiable in tracing dashboards.
  */
 export const MarketplaceAttributes = {
+  // ---- HTTP ----
+  /** HTTP method: GET, POST, etc. */
+  HTTP_METHOD: 'marketplace.http.method',
+  /** Route pattern: /api/tokens/[chain]/[address] */
+  HTTP_ROUTE: 'marketplace.http.route',
+  /** HTTP response status code */
+  HTTP_STATUS_CODE: 'marketplace.http.status_code',
+
+  // ---- Response ----
+  /** Number of items in the response payload */
+  RESPONSE_ITEMS: 'marketplace.response.items',
+
   // ---- Blockchain / Chain ----
   /** Blockchain network: "ethereum", "solana", "ronin" */
   CHAIN: 'marketplace.chain',
@@ -200,6 +308,22 @@ export const MarketplaceAttributes = {
   /** Size of the source price history array */
   SPARKLINE_HISTORY_SIZE: 'marketplace.sparkline.history_size',
 
+  // ---- Database / Data Source ----
+  /** DB operation type: read, write, aggregate, scan */
+  DB_OPERATION: 'marketplace.db.operation',
+  /** Simulated DB collection/table name */
+  DB_COLLECTION: 'marketplace.db.collection',
+  /** Simulated DB query duration in ms */
+  DB_DURATION_MS: 'marketplace.db.duration_ms',
+  /** Data source: in-memory, redis, postgres, api */
+  DATA_SOURCE: 'marketplace.data.source',
+
+  // ---- Enrichment ----
+  /** Enrichment data source: faker, cache, oracle */
+  ENRICHMENT_SOURCE: 'marketplace.enrichment.source',
+  /** Number of fields enriched */
+  ENRICHMENT_FIELDS: 'marketplace.enrichment.fields_count',
+
   // ---- Infrastructure ----
   /** Simulated latency delay in milliseconds */
   INFRA_LATENCY_MS: 'marketplace.infra.latency_ms',
@@ -217,6 +341,16 @@ export const MarketplaceAttributes = {
   ERROR_TYPE: 'marketplace.error.type',
   /** Unique request ID for log/trace correlation */
   ERROR_REQUEST_ID: 'marketplace.error.request_id',
+  /** The span name where the error originated */
+  ERROR_ORIGIN_SPAN: 'marketplace.error.origin_span',
+  /** Full stack trace string */
+  ERROR_STACK_TRACE: 'marketplace.error.stack_trace',
+  /** Human-readable error message */
+  ERROR_MESSAGE: 'marketplace.error.message',
+  /** Time spent processing the error in ms */
+  ERROR_PROCESSING_MS: 'marketplace.error.processing_ms',
+  /** JSON-serialized context from MarketplaceError */
+  ERROR_CONTEXT: 'marketplace.error.context',
 
   // ---- Busybox / Chaos ----
   /** Whether busybox chaos injection is currently enabled */
@@ -226,3 +360,6 @@ export const MarketplaceAttributes = {
   /** Whether this request was affected by busybox fault injection */
   BUSYBOX_INJECTED: 'marketplace.busybox.injected',
 } as const;
+
+/** Shorthand alias */
+export const MA = MarketplaceAttributes;

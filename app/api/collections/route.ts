@@ -3,22 +3,20 @@
  *
  * Paginated, filtered, sorted list of NFT collections.
  *
- * Status codes: 200, 400, 500, 503, 429
- * Error codes: INVALID_PAGINATION, COLLECTION_LIST_FAILED, BUSYBOX_*
- *
  * Trace structure:
- *   marketplace.collections.list
+ *   marketplace.collections.list (opensea-api-gateway)
  *     ├── marketplace.infra.latency_simulation
- *     ├── marketplace.collections.filter
- *     ├── marketplace.collections.sort
- *     └── marketplace.collections.paginate
+ *     ├── marketplace.collections.filter (opensea-data-service)
+ *     ├── marketplace.collections.sort (opensea-data-service)
+ *     ├── marketplace.collections.paginate (opensea-data-service)
+ *     └── marketplace.enrichment.collection xN (opensea-enrichment)
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { collections } from "@/app/lib/data/collections";
 import { ensurePriceEngine } from "@/app/lib/price-engine";
-import { simulateLatency } from "@/app/lib/utils";
-import { tracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
+import { simulateLatency, simulateDbLatency } from "@/app/lib/utils";
+import { apiTracer, dataTracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
 import { handleRouteError } from "@/app/lib/error-handler";
 import { maybeFault } from "@/app/lib/busybox";
 import { ValidationError } from "@/app/lib/errors";
@@ -37,7 +35,9 @@ export async function GET(request: NextRequest) {
   const q = searchParams.get("q")?.toLowerCase() || "";
   const category = searchParams.get("category") || "all";
 
-  return withSpan(tracer, 'marketplace.collections.list', {
+  return withSpan(apiTracer, 'marketplace.collections.list', {
+    [MA.HTTP_METHOD]: 'GET',
+    [MA.HTTP_ROUTE]: '/api/collections',
     [MA.FILTER_CHAIN]: chain, [MA.FILTER_SORT]: sort, [MA.FILTER_CATEGORY]: category,
     [MA.PAGINATION_LIMIT]: limit, [MA.PAGINATION_OFFSET]: offset,
   }, async (rootSpan) => {
@@ -47,7 +47,6 @@ export async function GET(request: NextRequest) {
       maybeFault('http503', { route: '/api/collections' });
       maybeFault('http429', { route: '/api/collections' });
 
-      // Validate pagination params
       if (isNaN(limit) || limit < 1 || limit > 100) {
         throw new ValidationError('INVALID_PAGINATION', `Invalid limit: must be 1-100, got ${searchParams.get("limit")}`, { limit: searchParams.get("limit") });
       }
@@ -57,7 +56,12 @@ export async function GET(request: NextRequest) {
 
       await simulateLatency(30, 90);
 
-      let filtered = await withSpan(tracer, 'marketplace.collections.filter', { [MA.FILTER_CHAIN]: chain, [MA.FILTER_CATEGORY]: category, [MA.SEARCH_QUERY]: q }, async (span) => {
+      let filtered = await withSpan(dataTracer, 'marketplace.collections.filter', {
+        [MA.FILTER_CHAIN]: chain, [MA.FILTER_CATEGORY]: category, [MA.SEARCH_QUERY]: q,
+        [MA.DB_OPERATION]: 'scan', [MA.DB_COLLECTION]: 'collections', [MA.DATA_SOURCE]: 'in-memory',
+      }, async (span) => {
+        const delayMs = await simulateDbLatency('db_read');
+        span.setAttribute(MA.DB_DURATION_MS, delayMs);
         let result = [...collections];
         if (chain !== "all") result = result.filter((c) => c.chain === chain);
         if (category !== "all") result = result.filter((c) => c.category === category);
@@ -66,7 +70,11 @@ export async function GET(request: NextRequest) {
         return result;
       });
 
-      filtered = await withSpan(tracer, 'marketplace.collections.sort', { [MA.FILTER_SORT]: sort }, async (span) => {
+      filtered = await withSpan(dataTracer, 'marketplace.collections.sort', {
+        [MA.FILTER_SORT]: sort, [MA.DB_OPERATION]: 'aggregate', [MA.DATA_SOURCE]: 'in-memory',
+      }, async (span) => {
+        const delayMs = await simulateDbLatency('cache_hit');
+        span.setAttribute(MA.DB_DURATION_MS, delayMs);
         const sorted = [...filtered];
         switch (sort) {
           case "volume": sorted.sort((a, b) => b.totalVolume - a.totalVolume); break;
@@ -83,22 +91,27 @@ export async function GET(request: NextRequest) {
       const total = filtered.length;
       const hasMore = offset + limit < total;
 
-      const paginated = await withSpan(tracer, 'marketplace.collections.paginate', {
+      const paginated = await withSpan(dataTracer, 'marketplace.collections.paginate', {
         [MA.PAGINATION_OFFSET]: offset, [MA.PAGINATION_LIMIT]: limit, [MA.PAGINATION_TOTAL]: total, [MA.PAGINATION_HAS_MORE]: hasMore,
+        [MA.DB_OPERATION]: 'read',
       }, async (span) => {
+        const delayMs = await simulateDbLatency('cache_hit');
+        span.setAttribute(MA.DB_DURATION_MS, delayMs);
         const page = filtered.slice(offset, offset + limit);
         span.setAttribute(MA.RESULT_COUNT, page.length);
         return page;
       });
 
-      // Enrich with faker fluctuations to simulate live db data
-      const enriched = paginated.map(enrichCollection);
+      // Enrich with faker fluctuations
+      const enriched = await Promise.all(paginated.map(enrichCollection));
 
       rootSpan.setAttribute(MA.PAGINATION_TOTAL, total);
       rootSpan.setAttribute(MA.RESULT_COUNT, enriched.length);
+      rootSpan.setAttribute(MA.HTTP_STATUS_CODE, 200);
+      rootSpan.setAttribute(MA.RESPONSE_ITEMS, enriched.length);
       return NextResponse.json({ data: enriched, total, limit, offset, hasMore });
     } catch (error) {
-      return handleRouteError(error, rootSpan);
+      return await handleRouteError(error, rootSpan);
     }
   });
 }

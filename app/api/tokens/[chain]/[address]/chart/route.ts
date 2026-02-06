@@ -3,15 +3,18 @@
  *
  * OHLC price chart data with configurable timeframe and interval.
  *
- * Status codes: 200, 400, 404, 500, 503, 429
- * Error codes: TOKEN_NOT_FOUND, INVALID_TIMEFRAME, CHART_COMPUTATION_FAILED, BUSYBOX_*
+ * Trace structure:
+ *   marketplace.token.chart (opensea-api-gateway)
+ *     ├── marketplace.infra.latency_simulation
+ *     ├── marketplace.token.chart.lookup (opensea-data-service)
+ *     └── marketplace.price.ohlc (opensea-price-engine)
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { tokens } from "@/app/lib/data/tokens";
 import { ensurePriceEngine, getOHLCData } from "@/app/lib/price-engine";
-import { simulateLatency } from "@/app/lib/utils";
-import { tracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
+import { simulateLatency, simulateDbLatency } from "@/app/lib/utils";
+import { apiTracer, dataTracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
 import { handleRouteError } from "@/app/lib/error-handler";
 import { maybeFault } from "@/app/lib/busybox";
 import { NotFoundError, ValidationError } from "@/app/lib/errors";
@@ -31,7 +34,9 @@ export async function GET(
   const timeframe = searchParams.get("timeframe") || "1h";
   const interval = searchParams.get("interval") || "1m";
 
-  return withSpan(tracer, 'marketplace.token.chart', {
+  return withSpan(apiTracer, 'marketplace.token.chart', {
+    [MA.HTTP_METHOD]: 'GET',
+    [MA.HTTP_ROUTE]: '/api/tokens/[chain]/[address]/chart',
     [MA.CHAIN]: chain, [MA.TOKEN_ADDRESS]: address, [MA.CHART_TIMEFRAME]: timeframe, [MA.CHART_INTERVAL]: interval,
   }, async (rootSpan) => {
     try {
@@ -50,7 +55,12 @@ export async function GET(
 
       await simulateLatency(40, 100);
 
-      const token = await withSpan(tracer, 'marketplace.token.chart.lookup', { [MA.CHAIN]: chain, [MA.TOKEN_ADDRESS]: address }, async (span) => {
+      const token = await withSpan(dataTracer, 'marketplace.token.chart.lookup', {
+        [MA.CHAIN]: chain, [MA.TOKEN_ADDRESS]: address,
+        [MA.DB_OPERATION]: 'read', [MA.DB_COLLECTION]: 'tokens', [MA.DATA_SOURCE]: 'in-memory',
+      }, async (span) => {
+        const delayMs = await simulateDbLatency('db_read');
+        span.setAttribute(MA.DB_DURATION_MS, delayMs);
         const found = tokens.find((t) => t.chain === chain && t.address === address);
         if (found) {
           span.setAttribute(MA.TOKEN_SYMBOL, found.symbol);
@@ -68,12 +78,14 @@ export async function GET(
       const timeframeMap: Record<string, number> = { "1h": 60, "1d": 1440, "7d": 10080, "30d": 43200 };
       const intervalMap: Record<string, number> = { "1m": 1, "5m": 5, "15m": 15, "1h": 60, "4h": 240, "1d": 1440 };
 
-      const ohlc = getOHLCData(token.priceHistory, timeframeMap[timeframe], intervalMap[interval]);
+      const ohlc = await getOHLCData(token.priceHistory, timeframeMap[timeframe], intervalMap[interval]);
       rootSpan.setAttribute(MA.CHART_CANDLE_COUNT, ohlc.length);
+      rootSpan.setAttribute(MA.HTTP_STATUS_CODE, 200);
+      rootSpan.setAttribute(MA.RESPONSE_ITEMS, ohlc.length);
 
       return NextResponse.json({ token: token.symbol, chain: token.chain, timeframe, interval, data: ohlc });
     } catch (error) {
-      return handleRouteError(error, rootSpan);
+      return await handleRouteError(error, rootSpan);
     }
   });
 }

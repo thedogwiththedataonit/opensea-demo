@@ -3,15 +3,22 @@
  *
  * Paginated, filtered, sorted token list with sparkline data.
  *
- * Status codes: 200, 400, 500, 503, 429
- * Error codes: INVALID_PAGINATION, TOKEN_LIST_FAILED, BUSYBOX_*
+ * Trace structure:
+ *   marketplace.tokens.list (opensea-api-gateway)
+ *     ├── marketplace.infra.latency_simulation
+ *     ├── marketplace.tokens.filter (opensea-data-service)
+ *     ├── marketplace.tokens.tab_sort (opensea-data-service)
+ *     ├── marketplace.tokens.paginate (opensea-data-service)
+ *     └── marketplace.tokens.sparkline_extraction (opensea-data-service)
+ *           ├── marketplace.price.sparkline xN (opensea-price-engine)
+ *           └── marketplace.enrichment.token xN (opensea-enrichment)
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { tokens } from "@/app/lib/data/tokens";
 import { ensurePriceEngine, getSparklineData } from "@/app/lib/price-engine";
-import { simulateLatency } from "@/app/lib/utils";
-import { tracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
+import { simulateLatency, simulateDbLatency } from "@/app/lib/utils";
+import { apiTracer, dataTracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
 import { handleRouteError } from "@/app/lib/error-handler";
 import { maybeFault } from "@/app/lib/busybox";
 import { ValidationError } from "@/app/lib/errors";
@@ -32,7 +39,9 @@ export async function GET(request: NextRequest) {
   const fdvMin = parseFloat(searchParams.get("fdvMin") || "0");
   const fdvMax = parseFloat(searchParams.get("fdvMax") || "999999999999");
 
-  return withSpan(tracer, 'marketplace.tokens.list', {
+  return withSpan(apiTracer, 'marketplace.tokens.list', {
+    [MA.HTTP_METHOD]: 'GET',
+    [MA.HTTP_ROUTE]: '/api/tokens',
     [MA.FILTER_TAB]: tab, [MA.FILTER_CHAIN]: chain, [MA.FILTER_SORT]: sort,
     [MA.FILTER_ORDER]: order, [MA.PAGINATION_LIMIT]: limit, [MA.PAGINATION_OFFSET]: offset,
   }, async (rootSpan) => {
@@ -51,9 +60,12 @@ export async function GET(request: NextRequest) {
 
       await simulateLatency(30, 100);
 
-      let filtered = await withSpan(tracer, 'marketplace.tokens.filter', {
+      let filtered = await withSpan(dataTracer, 'marketplace.tokens.filter', {
         [MA.FILTER_CHAIN]: chain, [MA.FILTER_FDV_MIN]: fdvMin, [MA.FILTER_FDV_MAX]: fdvMax,
+        [MA.DB_OPERATION]: 'scan', [MA.DB_COLLECTION]: 'tokens', [MA.DATA_SOURCE]: 'in-memory',
       }, async (span) => {
+        const delayMs = await simulateDbLatency('db_read');
+        span.setAttribute(MA.DB_DURATION_MS, delayMs);
         let result = [...tokens];
         if (chain !== "all") result = result.filter((t) => t.chain === chain);
         result = result.filter((t) => t.fdv >= fdvMin && t.fdv <= fdvMax);
@@ -61,9 +73,12 @@ export async function GET(request: NextRequest) {
         return result;
       });
 
-      filtered = await withSpan(tracer, 'marketplace.tokens.tab_sort', {
+      filtered = await withSpan(dataTracer, 'marketplace.tokens.tab_sort', {
         [MA.FILTER_TAB]: tab, [MA.FILTER_SORT]: sort, [MA.FILTER_ORDER]: order,
+        [MA.DB_OPERATION]: 'aggregate', [MA.DATA_SOURCE]: 'in-memory',
       }, async (span) => {
+        const delayMs = await simulateDbLatency('cache_hit');
+        span.setAttribute(MA.DB_DURATION_MS, delayMs);
         const sorted = [...filtered];
         switch (tab) {
           case "trending": sorted.sort((a, b) => Math.abs(b.change1d) - Math.abs(a.change1d)); break;
@@ -93,34 +108,43 @@ export async function GET(request: NextRequest) {
 
       const total = filtered.length;
       const hasMore = offset + limit < total;
-      const paginated = await withSpan(tracer, 'marketplace.tokens.paginate', {
+      const paginated = await withSpan(dataTracer, 'marketplace.tokens.paginate', {
         [MA.PAGINATION_OFFSET]: offset, [MA.PAGINATION_LIMIT]: limit,
         [MA.PAGINATION_TOTAL]: total, [MA.PAGINATION_HAS_MORE]: hasMore,
+        [MA.DB_OPERATION]: 'read',
       }, async (span) => {
+        const delayMs = await simulateDbLatency('cache_hit');
+        span.setAttribute(MA.DB_DURATION_MS, delayMs);
         const page = filtered.slice(offset, offset + limit);
         span.setAttribute(MA.RESULT_COUNT, page.length);
         return page;
       });
 
-      const withSparklineData = await withSpan(tracer, 'marketplace.tokens.sparkline_extraction', { [MA.RESULT_COUNT]: paginated.length }, async (span) => {
-        const results = paginated.map((t) => {
-          const enriched = enrichTokenFields(t);
+      const withSparklineData = await withSpan(dataTracer, 'marketplace.tokens.sparkline_extraction', {
+        [MA.RESULT_COUNT]: paginated.length,
+        [MA.DATA_SOURCE]: 'redis',
+      }, async (span) => {
+        const results = await Promise.all(paginated.map(async (t) => {
+          const enriched = await enrichTokenFields(t);
+          const sparkline = await getSparklineData(t.priceHistory, 20);
           return {
             ...t,
             ...enriched,
-            sparkline: getSparklineData(t.priceHistory, 20).map((p) => p.price),
+            sparkline: sparkline.map((p) => p.price),
             priceHistory: undefined,
           };
-        });
+        }));
         span.setAttribute(MA.RESULT_COUNT, results.length);
         return results;
       });
 
       rootSpan.setAttribute(MA.PAGINATION_TOTAL, total);
       rootSpan.setAttribute(MA.RESULT_COUNT, withSparklineData.length);
+      rootSpan.setAttribute(MA.HTTP_STATUS_CODE, 200);
+      rootSpan.setAttribute(MA.RESPONSE_ITEMS, withSparklineData.length);
       return NextResponse.json({ data: withSparklineData, total, limit, offset, hasMore });
     } catch (error) {
-      return handleRouteError(error, rootSpan);
+      return await handleRouteError(error, rootSpan);
     }
   });
 }
