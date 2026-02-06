@@ -11,5 +11,5 @@ import { registerOTel } from '@vercel/otel';
  * originating from this application in observability backends.
  */
 export function register() {
-  registerOTel({ serviceName: 'opensea-marketplace' });
+  registerOTel({ serviceName: 'opensea-demo' });
 }
