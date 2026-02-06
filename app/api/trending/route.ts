@@ -27,7 +27,7 @@ import { tokens } from "@/app/lib/data/tokens";
 import { ensurePriceEngine, getSparklineData } from "@/app/lib/price-engine";
 import { simulateLatency, simulateDbLatency } from "@/app/lib/utils";
 import { SpanStatusCode } from "@opentelemetry/api";
-import { apiTracer, mongoTracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
+import { apiTracer, mongoTracer, withSpan, MarketplaceAttributes as MA, recordEdgeHeaders, tagSpanService } from "@/app/lib/tracing";
 import { handleRouteError } from "@/app/lib/error-handler";
 import { maybeFault } from "@/app/lib/busybox";
 import { enrichCollection, enrichTokenFields, generateMarketplaceStats } from "@/app/lib/faker-enrich";
@@ -35,7 +35,7 @@ import { log } from "@/app/lib/logger";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: Request) {
   ensurePriceEngine();
 
   return apiTracer.startActiveSpan('marketplace.trending.aggregate', {
@@ -44,6 +44,8 @@ export async function GET() {
       [MA.HTTP_ROUTE]: '/api/trending',
     },
   }, async (rootSpan) => {
+    tagSpanService(rootSpan, 'opensea-api-gateway');
+    recordEdgeHeaders(rootSpan, request.headers);
     const _start = Date.now();
     log.info('api-gateway', 'GET /api/trending', {});
     try {

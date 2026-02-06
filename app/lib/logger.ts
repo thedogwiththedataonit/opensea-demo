@@ -17,7 +17,9 @@ export type ServiceTag =
   | 'price-engine'
   | 'search-engine'
   | 'busybox'
-  | 'admin';
+  | 'admin'
+  | 'edge-middleware'
+  | 'edge-function';
 
 function timestamp(): string {
   const d = new Date();

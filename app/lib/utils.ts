@@ -6,7 +6,7 @@
  * integrated with the busybox chaos engine for timeout fault injection.
  */
 
-import { apiTracer, MarketplaceAttributes as MA } from './tracing';
+import { apiTracer, MarketplaceAttributes as MA, tagSpanService } from './tracing';
 import { shouldInjectFault } from './busybox';
 import { TimeoutError } from './errors';
 import { log } from './logger';
@@ -128,6 +128,7 @@ export async function simulateLatency(min: number = 20, max: number = 80): Promi
       },
     },
     async (span) => {
+      tagSpanService(span, 'opensea-api-gateway');
       if (isTimeout) {
         span.setAttribute(MA.BUSYBOX_FAULT_TYPE, 'timeout');
         log.warn('api-gateway', 'latency_simulation', { injected: 'timeout', delay: `${delay}ms` });

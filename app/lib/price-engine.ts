@@ -10,7 +10,7 @@
 import { tokens } from "./data/tokens";
 import { collections } from "./data/collections";
 import { PricePoint } from "./data/types";
-import { redisTracer, withErrorSpan, MarketplaceAttributes as MA } from "./tracing";
+import { redisTracer, withErrorSpan, MarketplaceAttributes as MA, tagSpanService } from "./tracing";
 import { maybeFault } from "./busybox";
 import { SpanStatusCode } from "@opentelemetry/api";
 import { log } from "./logger";
@@ -69,6 +69,7 @@ export async function getSparklineData(priceHistory: PricePoint[], points: numbe
       [MA.DB_OPERATION]: 'read',
     },
   }, async (span) => {
+    tagSpanService(span, 'redis-cache');
     try {
       // Simulate Redis cache lookup
       const cacheDelay = Math.round(1 + Math.random() * 4);
@@ -133,6 +134,7 @@ export async function getOHLCData(
       [MA.DB_OPERATION]: 'aggregate',
     },
   }, async (span) => {
+    tagSpanService(span, 'redis-cache');
     try {
       // Simulate computation delay
       const computeDelay = Math.round(5 + Math.random() * 15);

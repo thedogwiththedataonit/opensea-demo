@@ -82,6 +82,52 @@ export const searchTracer = esTracer;
 export const priceTracer = redisTracer;
 
 // ---------------------------------------------------------------------------
+// Tracer → Service Name Mapping
+// ---------------------------------------------------------------------------
+
+/**
+ * Maps each tracer instance to a service name string.
+ * Used to set `peer.service` and `service.name` span attributes so that
+ * Datadog (and other APMs) display each span under the correct service
+ * node in the Service Map — overriding the resource-level service name.
+ */
+const TRACER_SERVICE_MAP = new Map<ReturnType<typeof trace.getTracer>, string>();
+TRACER_SERVICE_MAP.set(apiTracer, 'opensea-api-gateway');
+TRACER_SERVICE_MAP.set(mongoTracer, 'mongodb-atlas');
+TRACER_SERVICE_MAP.set(esTracer, 'elasticsearch');
+TRACER_SERVICE_MAP.set(redisTracer, 'redis-cache');
+TRACER_SERVICE_MAP.set(chainlinkTracer, 'chainlink-oracle');
+TRACER_SERVICE_MAP.set(uniswapTracer, 'uniswap-router');
+TRACER_SERVICE_MAP.set(alchemyTracer, 'alchemy-nft-api');
+TRACER_SERVICE_MAP.set(coingeckoTracer, 'coingecko-api');
+TRACER_SERVICE_MAP.set(etherscanTracer, 'etherscan-api');
+TRACER_SERVICE_MAP.set(reservoirTracer, 'reservoir-api');
+TRACER_SERVICE_MAP.set(gasTracer, 'etherscan-gas');
+TRACER_SERVICE_MAP.set(ddTracer, 'datadog-apm');
+TRACER_SERVICE_MAP.set(tracer, 'opensea-marketplace');
+
+/** Resolve the service name for a tracer. Falls back to 'opensea-marketplace'. */
+function getServiceName(t: ReturnType<typeof trace.getTracer>): string {
+  return TRACER_SERVICE_MAP.get(t) || 'opensea-marketplace';
+}
+
+/**
+ * Sets service identity attributes on a span so APM tools (Datadog, etc.)
+ * display it under the correct service node in the Service Map.
+ *
+ * Sets both:
+ *  - `peer.service`  (OTel semantic convention for downstream dependency)
+ *  - `service.name`  (Datadog-recognized override of resource-level service)
+ *
+ * Called automatically by `withSpan()` and `withErrorSpan()`.
+ * For root spans using `startActiveSpan()` directly, call this manually.
+ */
+export function tagSpanService(span: Span, serviceName: string): void {
+  span.setAttribute('peer.service', serviceName);
+  span.setAttribute('service.name', serviceName);
+}
+
+// ---------------------------------------------------------------------------
 // Error Span Name Mapping
 // ---------------------------------------------------------------------------
 
@@ -129,6 +175,9 @@ export async function withErrorSpan(
 
   return t.startActiveSpan(spanName, { attributes: { ...attrs } }, async (span) => {
     try {
+      // Tag service identity for APM service map
+      tagSpanService(span, getServiceName(t));
+
       // Set error status
       span.setStatus({
         code: SpanStatusCode.ERROR,
@@ -200,6 +249,8 @@ export async function withSpan<T>(
   fn: (span: Span) => Promise<T>
 ): Promise<T> {
   return t.startActiveSpan(name, { attributes: attrs }, async (span) => {
+    // Tag service identity for APM service map
+    tagSpanService(span, getServiceName(t));
     try {
       const result = await fn(span);
       span.setStatus({ code: SpanStatusCode.OK });
@@ -401,6 +452,14 @@ export const MarketplaceAttributes = {
   /** JSON-serialized context from MarketplaceError */
   ERROR_CONTEXT: 'marketplace.error.context',
 
+  // ---- Edge Runtime ----
+  /** Edge region that handled the request (e.g., iad1, sfo1, cdg1) */
+  EDGE_REGION: 'marketplace.edge.region',
+  /** Edge-generated request ID */
+  EDGE_REQUEST_ID: 'marketplace.edge.request_id',
+  /** Time spent in edge middleware (ms) */
+  EDGE_LATENCY_MS: 'marketplace.edge.latency_ms',
+
   // ---- Busybox / Chaos ----
   /** Whether busybox chaos injection is currently enabled */
   BUSYBOX_ENABLED: 'marketplace.busybox.enabled',
@@ -412,3 +471,24 @@ export const MarketplaceAttributes = {
 
 /** Shorthand alias */
 export const MA = MarketplaceAttributes;
+
+// ---------------------------------------------------------------------------
+// Edge Header Reader
+// ---------------------------------------------------------------------------
+
+/**
+ * Reads x-edge-* headers injected by Edge Middleware and records them
+ * as span attributes on the root span. Call in every Node.js route handler.
+ */
+export function recordEdgeHeaders(span: Span, headers: Headers): void {
+  const region = headers.get('x-edge-region');
+  const requestId = headers.get('x-edge-request-id');
+  const startTime = headers.get('x-edge-start-time');
+
+  if (region) span.setAttribute(MA.EDGE_REGION, region);
+  if (requestId) span.setAttribute(MA.EDGE_REQUEST_ID, requestId);
+  if (startTime) {
+    const edgeLatency = Date.now() - parseInt(startTime);
+    if (!isNaN(edgeLatency)) span.setAttribute(MA.EDGE_LATENCY_MS, edgeLatency);
+  }
+}

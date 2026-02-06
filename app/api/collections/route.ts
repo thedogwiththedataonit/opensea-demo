@@ -17,7 +17,7 @@ import { collections } from "@/app/lib/data/collections";
 import { ensurePriceEngine } from "@/app/lib/price-engine";
 import { simulateLatency, simulateDbLatency } from "@/app/lib/utils";
 import { SpanStatusCode } from "@opentelemetry/api";
-import { apiTracer, mongoTracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
+import { apiTracer, mongoTracer, withSpan, MarketplaceAttributes as MA, recordEdgeHeaders, tagSpanService } from "@/app/lib/tracing";
 import { handleRouteError } from "@/app/lib/error-handler";
 import { maybeFault } from "@/app/lib/busybox";
 import { ValidationError } from "@/app/lib/errors";
@@ -45,6 +45,8 @@ export async function GET(request: NextRequest) {
       [MA.PAGINATION_LIMIT]: limit, [MA.PAGINATION_OFFSET]: offset,
     },
   }, async (rootSpan) => {
+    tagSpanService(rootSpan, 'opensea-api-gateway');
+    recordEdgeHeaders(rootSpan, request.headers);
     const _start = Date.now();
     log.info('api-gateway', 'GET /api/collections', { chain, sort, category, limit, offset });
     try {
