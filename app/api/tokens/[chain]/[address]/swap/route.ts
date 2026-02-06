@@ -1,12 +1,12 @@
 /**
  * POST /api/tokens/[chain]/[address]/swap
  *
- * Generates a mock swap quote for exchanging one token for another.
- * Simulates DEX aggregator behavior with price impact calculation,
- * fee computation, gas estimation, and route description.
+ * Mock swap quote with price impact, fees, gas, and routing.
  *
- * Intentionally uses higher latency (80-200ms) to simulate the real-world
- * cost of querying multiple liquidity sources for optimal routing.
+ * Status codes: 200, 400, 404, 422, 500, 503, 429
+ * Error codes: INVALID_REQUEST_BODY, SWAP_VALIDATION_FAILED, TOKEN_NOT_FOUND,
+ *   INSUFFICIENT_LIQUIDITY, PRICE_IMPACT_TOO_HIGH, SWAP_COMPUTATION_FAILED,
+ *   LIQUIDITY_UNAVAILABLE, BUSYBOX_*
  *
  * Trace structure:
  *   marketplace.swap.quote
@@ -24,6 +24,9 @@ import { ensurePriceEngine } from "@/app/lib/price-engine";
 import { simulateLatency } from "@/app/lib/utils";
 import { SwapQuote } from "@/app/lib/data/types";
 import { tracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
+import { handleRouteError } from "@/app/lib/error-handler";
+import { maybeFault } from "@/app/lib/busybox";
+import { ValidationError, NotFoundError, UnprocessableError } from "@/app/lib/errors";
 
 export const dynamic = "force-dynamic";
 
@@ -32,68 +35,45 @@ export async function POST(
   { params }: { params: Promise<{ chain: string; address: string }> }
 ) {
   ensurePriceEngine();
-
   const { chain, address } = await params;
 
-  return withSpan(tracer, 'marketplace.swap.quote', {
-    [MA.CHAIN]: chain,
-    [MA.TOKEN_ADDRESS]: address,
-  }, async (rootSpan) => {
-    await simulateLatency(80, 200);
+  return withSpan(tracer, 'marketplace.swap.quote', { [MA.CHAIN]: chain, [MA.TOKEN_ADDRESS]: address }, async (rootSpan) => {
+    try {
+      maybeFault('http500', { route: '/api/tokens/[chain]/[address]/swap', chain, address });
+      maybeFault('http503', { route: '/api/tokens/[chain]/[address]/swap' });
+      maybeFault('http429', { route: '/api/tokens/[chain]/[address]/swap' });
 
-    // --- Validate request body ---
-    const validatedBody = await withSpan(
-      tracer,
-      'marketplace.swap.validate_input',
-      {},
-      async (span) => {
+      await simulateLatency(80, 200);
+
+      // --- Validate request body ---
+      const validatedBody = await withSpan(tracer, 'marketplace.swap.validate_input', {}, async (span) => {
         let body: { fromToken?: string; toToken?: string; amount?: number };
         try {
           body = await request.json();
         } catch {
-          span.setAttribute('error', true);
-          span.setAttribute('error.type', 'invalid_json');
-          return { error: "Invalid JSON body", status: 400 } as const;
+          throw new ValidationError('INVALID_REQUEST_BODY', 'Request body must be valid JSON', { contentType: request.headers.get('content-type') });
         }
 
         const { fromToken, toToken, amount } = body;
-
         if (!fromToken || !toToken || !amount || amount <= 0) {
-          span.setAttribute('error', true);
-          span.setAttribute('error.type', 'validation_failed');
-          return {
-            error: "Missing required fields: fromToken, toToken, amount (> 0)",
-            status: 400,
-          } as const;
+          throw new ValidationError('SWAP_VALIDATION_FAILED', 'Missing required fields: fromToken, toToken, amount (> 0)', {
+            fromToken: fromToken || null, toToken: toToken || null, amount: amount || null,
+          });
         }
 
         span.setAttribute(MA.SWAP_FROM_TOKEN, fromToken);
         span.setAttribute(MA.SWAP_TO_TOKEN, toToken);
         span.setAttribute(MA.SWAP_FROM_AMOUNT, amount);
-        return { fromToken, toToken, amount } as const;
-      }
-    );
+        return { fromToken, toToken, amount };
+      });
 
-    // Handle validation errors
-    if ('error' in validatedBody && 'status' in validatedBody) {
-      rootSpan.setAttribute('error', true);
-      return NextResponse.json(
-        { error: validatedBody.error },
-        { status: validatedBody.status }
-      );
-    }
+      const { fromToken, toToken, amount } = validatedBody;
+      rootSpan.setAttribute(MA.SWAP_FROM_TOKEN, fromToken);
+      rootSpan.setAttribute(MA.SWAP_TO_TOKEN, toToken);
+      rootSpan.setAttribute(MA.SWAP_FROM_AMOUNT, amount);
 
-    const { fromToken, toToken, amount } = validatedBody;
-    rootSpan.setAttribute(MA.SWAP_FROM_TOKEN, fromToken);
-    rootSpan.setAttribute(MA.SWAP_TO_TOKEN, toToken);
-    rootSpan.setAttribute(MA.SWAP_FROM_AMOUNT, amount);
-
-    // --- Look up the target token ---
-    const targetToken = await withSpan(
-      tracer,
-      'marketplace.swap.token_lookup',
-      { [MA.CHAIN]: chain, [MA.TOKEN_ADDRESS]: address },
-      async (span) => {
+      // --- Look up target token ---
+      const targetToken = await withSpan(tracer, 'marketplace.swap.token_lookup', { [MA.CHAIN]: chain, [MA.TOKEN_ADDRESS]: address }, async (span) => {
         const found = tokens.find((t) => t.chain === chain && t.address === address);
         if (found) {
           span.setAttribute(MA.TOKEN_SYMBOL, found.symbol);
@@ -101,90 +81,71 @@ export async function POST(
           span.setAttribute(MA.TOKEN_IS_NEW, found.isNew);
         }
         return found;
+      });
+
+      if (!targetToken) {
+        throw new NotFoundError('TOKEN_NOT_FOUND', `Token not found on ${chain} at ${address}`, { chain, address });
       }
-    );
 
-    if (!targetToken) {
-      rootSpan.setAttribute('error', true);
-      return NextResponse.json({ error: "Token not found" }, { status: 404 });
-    }
+      // Busybox: inject liquidity failure specifically for swap
+      maybeFault('http422', { route: '/api/tokens/[chain]/[address]/swap', token: targetToken.symbol });
 
-    // --- Resolve from/to prices in USD ---
-    const { fromPrice, toPrice, fromValueUsd } = await withSpan(
-      tracer,
-      'marketplace.swap.price_resolution',
-      {
-        [MA.SWAP_FROM_TOKEN]: fromToken,
-        [MA.TOKEN_SYMBOL]: targetToken.symbol,
-      },
-      async (span) => {
+      // --- Resolve prices ---
+      const { toPrice, fromValueUsd } = await withSpan(tracer, 'marketplace.swap.price_resolution', {
+        [MA.SWAP_FROM_TOKEN]: fromToken, [MA.TOKEN_SYMBOL]: targetToken.symbol,
+      }, async (span) => {
         const from = fromToken === "SOL" ? 195.42 : fromToken === "ETH" ? 1879.47 : 1;
         const to = targetToken.price;
         const usd = amount * from;
-
         span.setAttribute('marketplace.swap.from_price_usd', from);
         span.setAttribute('marketplace.swap.to_price_usd', to);
         span.setAttribute(MA.SWAP_AMOUNT_USD, usd);
         return { fromPrice: from, toPrice: to, fromValueUsd: usd };
-      }
-    );
+      });
 
-    rootSpan.setAttribute(MA.SWAP_AMOUNT_USD, fromValueUsd);
+      rootSpan.setAttribute(MA.SWAP_AMOUNT_USD, fromValueUsd);
 
-    // --- Calculate price impact and fees ---
-    const { priceImpact, fee, effectiveAmount, toAmount } = await withSpan(
-      tracer,
-      'marketplace.swap.impact_calculation',
-      { [MA.SWAP_AMOUNT_USD]: fromValueUsd },
-      async (span) => {
+      // --- Compute price impact + fees ---
+      const { priceImpact, fee, toAmount } = await withSpan(tracer, 'marketplace.swap.impact_calculation', { [MA.SWAP_AMOUNT_USD]: fromValueUsd }, async (span) => {
         const impact = Math.min(fromValueUsd / (targetToken.volume1d || 1) * 100, 50);
         const swapFee = fromValueUsd * 0.003;
         const effective = fromValueUsd - swapFee;
         const output = effective / toPrice * (1 - impact / 100);
 
+        // Business logic check: reject if price impact is dangerously high
+        if (impact > 25) {
+          throw new UnprocessableError('PRICE_IMPACT_TOO_HIGH', `Price impact of ${impact.toFixed(2)}% exceeds 25% safety threshold`, {
+            priceImpact: impact, threshold: 25, amountUsd: fromValueUsd,
+          });
+        }
+
         span.setAttribute(MA.SWAP_PRICE_IMPACT_PCT, impact);
         span.setAttribute(MA.SWAP_FEE_USD, swapFee);
         span.setAttribute(MA.SWAP_TO_AMOUNT, output);
-        return { priceImpact: impact, fee: swapFee, effectiveAmount: effective, toAmount: output };
-      }
-    );
+        return { priceImpact: impact, fee: swapFee, toAmount: output };
+      });
 
-    // --- Assemble the final swap quote ---
-    const quote = await withSpan(
-      tracer,
-      'marketplace.swap.quote_assembly',
-      {},
-      async (span) => {
+      // --- Assemble quote ---
+      const quote = await withSpan(tracer, 'marketplace.swap.quote_assembly', {}, async (span) => {
         const estimatedGas = 0.001 + Math.random() * 0.005;
         const route = `${fromToken} → ${targetToken.symbol}`;
-        const expiresAt = Date.now() + 30000;
-
         const q: SwapQuote = {
-          fromToken,
-          toToken: targetToken.symbol,
-          fromAmount: amount,
-          toAmount,
-          priceImpact,
-          fee,
-          feeCurrency: "USD",
-          estimatedGas,
-          route,
-          expiresAt,
+          fromToken, toToken: targetToken.symbol, fromAmount: amount, toAmount,
+          priceImpact, fee, feeCurrency: "USD", estimatedGas, route, expiresAt: Date.now() + 30000,
         };
-
         span.setAttribute(MA.SWAP_ROUTE, route);
         span.setAttribute(MA.SWAP_ESTIMATED_GAS, estimatedGas);
         span.setAttribute(MA.SWAP_TO_AMOUNT, toAmount);
         return q;
-      }
-    );
+      });
 
-    // Record final quote summary on the root span for quick trace analysis
-    rootSpan.setAttribute(MA.SWAP_PRICE_IMPACT_PCT, quote.priceImpact);
-    rootSpan.setAttribute(MA.SWAP_FEE_USD, quote.fee);
-    rootSpan.setAttribute(MA.SWAP_TO_AMOUNT, quote.toAmount);
-    rootSpan.setAttribute(MA.SWAP_ROUTE, quote.route);
-
-    return NextResponse.json(quote);
+      rootSpan.setAttribute(MA.SWAP_PRICE_IMPACT_PCT, quote.priceImpact);
+      rootSpan.setAttribute(MA.SWAP_FEE_USD, quote.fee);
+      rootSpan.setAttribute(MA.SWAP_TO_AMOUNT, quote.toAmount);
+      rootSpan.setAttribute(MA.SWAP_ROUTE, quote.route);
+      return NextResponse.json(quote);
+    } catch (error) {
+      return handleRouteError(error, rootSpan);
+    }
   });
 }

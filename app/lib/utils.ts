@@ -2,35 +2,44 @@
  * OpenSea Marketplace — Shared Utilities
  *
  * Common helper functions used across API route handlers and components.
- * The simulateLatency function is instrumented with OpenTelemetry to produce
- * visible infrastructure spans in traces.
+ * The simulateLatency function is instrumented with OpenTelemetry and
+ * integrated with the busybox chaos engine for timeout fault injection.
  */
 
 import { tracer, MarketplaceAttributes as MA } from './tracing';
+import { shouldInjectFault } from './busybox';
 
 /**
  * Simulate network/processing latency for realistic tracing.
  *
- * Creates an OpenTelemetry span to make the simulated delay visible in traces,
- * allowing engineers to distinguish real processing time from injected latency.
- * The actual delay value is recorded as a span attribute for analysis.
+ * Creates an OpenTelemetry span to make the simulated delay visible in traces.
+ * When busybox timeout mode is enabled, the delay is amplified to 3-8 seconds
+ * to simulate timeout conditions in downstream services.
  *
- * @param min - Minimum delay in milliseconds
- * @param max - Maximum delay in milliseconds
+ * @param min - Minimum delay in milliseconds (normal mode)
+ * @param max - Maximum delay in milliseconds (normal mode)
  */
 export async function simulateLatency(min: number = 20, max: number = 80): Promise<void> {
-  const delay = Math.round(min + Math.random() * (max - min));
+  // Check if busybox should inject a timeout
+  const isTimeout = shouldInjectFault('timeout');
+  const delay = isTimeout
+    ? Math.round(3000 + Math.random() * 5000)  // 3-8 seconds under chaos
+    : Math.round(min + Math.random() * (max - min));
 
   return tracer.startActiveSpan(
     'marketplace.infra.latency_simulation',
     {
       attributes: {
-        [MA.INFRA_LATENCY_MIN_MS]: min,
-        [MA.INFRA_LATENCY_MAX_MS]: max,
+        [MA.INFRA_LATENCY_MIN_MS]: isTimeout ? 3000 : min,
+        [MA.INFRA_LATENCY_MAX_MS]: isTimeout ? 8000 : max,
         [MA.INFRA_LATENCY_MS]: delay,
+        [MA.BUSYBOX_INJECTED]: isTimeout,
       },
     },
     async (span) => {
+      if (isTimeout) {
+        span.setAttribute(MA.BUSYBOX_FAULT_TYPE, 'timeout');
+      }
       await new Promise((resolve) => setTimeout(resolve, delay));
       span.end();
     }

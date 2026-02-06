@@ -207,4 +207,22 @@ export const MarketplaceAttributes = {
   INFRA_LATENCY_MIN_MS: 'marketplace.infra.latency_min_ms',
   /** Maximum configured latency */
   INFRA_LATENCY_MAX_MS: 'marketplace.infra.latency_max_ms',
+
+  // ---- Error Metadata ----
+  /** Machine-readable error code */
+  ERROR_CODE: 'marketplace.error.code',
+  /** HTTP status code of the error response */
+  ERROR_STATUS_CODE: 'marketplace.error.status_code',
+  /** Error class name (e.g., "NotFoundError", "ValidationError") */
+  ERROR_TYPE: 'marketplace.error.type',
+  /** Unique request ID for log/trace correlation */
+  ERROR_REQUEST_ID: 'marketplace.error.request_id',
+
+  // ---- Busybox / Chaos ----
+  /** Whether busybox chaos injection is currently enabled */
+  BUSYBOX_ENABLED: 'marketplace.busybox.enabled',
+  /** The fault type that was injected */
+  BUSYBOX_FAULT_TYPE: 'marketplace.busybox.fault_type',
+  /** Whether this request was affected by busybox fault injection */
+  BUSYBOX_INJECTED: 'marketplace.busybox.injected',
 } as const;
