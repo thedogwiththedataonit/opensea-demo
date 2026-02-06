@@ -94,6 +94,11 @@ export default function AdminPage() {
       optimistic.enabledFaults = { ...busybox.enabledFaults, ...partial.enabledFaults };
     }
     setBusybox(optimistic);
+
+    // Sync chaos state to cookie so Edge Middleware can read it
+    const newEnabled = partial.enabled !== undefined ? partial.enabled : busybox.enabled;
+    document.cookie = `busybox_enabled=${newEnabled}; path=/; SameSite=Lax`;
+
     try {
       const res = await fetch("/api/admin/busybox", {
         method: "POST",
@@ -102,6 +107,8 @@ export default function AdminPage() {
       });
       const data = await res.json();
       setBusybox(data);
+      // Keep cookie in sync with server response
+      document.cookie = `busybox_enabled=${data.enabled}; path=/; SameSite=Lax`;
     } catch { /* revert on failure */ }
   }, [busybox]);
 
@@ -158,6 +165,7 @@ export default function AdminPage() {
   useEffect(() => {
     const disableBusybox = () => {
       // Fire-and-forget: disable busybox when leaving page
+      document.cookie = 'busybox_enabled=false; path=/; SameSite=Lax';
       navigator.sendBeacon("/api/admin/busybox", JSON.stringify({ enabled: false }));
     };
 

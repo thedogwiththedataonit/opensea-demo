@@ -3,13 +3,14 @@
  *
  * Runs on Vercel Edge Runtime before every /api/* request.
  * Performs edge-layer operations: request ID generation, region detection,
- * rate limiting, request validation, geo-blocking, and routing error simulation.
+ * rate limiting, request validation, geo-blocking, routing errors, edge
+ * timeouts, and TLS failures.
  *
- * OTEL is NOT supported on Edge Runtime — all observability uses structured
- * console.log. Custom x-edge-* headers are injected for downstream Node.js
- * routes to read and record on their OTel spans.
+ * Chaos mode is controlled via the `busybox_enabled` cookie (set by admin page).
+ * When active, error rates are elevated to simulate production failure scenarios
+ * at the edge layer.
  *
- * Edge errors returned directly: 429, 413, 403, 502
+ * Edge errors returned directly: 429, 413, 403, 502, 504, 503
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -49,7 +50,7 @@ function pickRegion(): string {
 }
 
 // ---------------------------------------------------------------------------
-// Request ID Generator (Edge-compatible, no crypto.randomUUID in all runtimes)
+// Request ID Generator
 // ---------------------------------------------------------------------------
 
 function generateEdgeRequestId(): string {
@@ -59,16 +60,14 @@ function generateEdgeRequestId(): string {
 }
 
 // ---------------------------------------------------------------------------
-// Chaos probability (edge-side rate limiting / geo-block / routing errors)
+// Chaos detection
 // ---------------------------------------------------------------------------
 
-// Edge middleware checks for a special header to enable chaos mode.
-// The admin page can set a cookie `busybox_enabled=true` to propagate chaos state.
 function isChaosEnabled(request: NextRequest): boolean {
   return request.cookies.get('busybox_enabled')?.value === 'true';
 }
 
-function shouldFire(rate: number = 0.15): boolean {
+function shouldFire(rate: number): boolean {
   return Math.random() < rate;
 }
 
@@ -76,7 +75,44 @@ function shouldFire(rate: number = 0.15): boolean {
 // Geo-blocked regions (simulated)
 // ---------------------------------------------------------------------------
 
-const GEO_BLOCKED_REGIONS = ['nrt1', 'sin1']; // Simulated: Japan + Singapore blocked
+const GEO_BLOCKED_REGIONS = ['nrt1', 'sin1'];
+
+// ---------------------------------------------------------------------------
+// Edge JSON error response builder
+// ---------------------------------------------------------------------------
+
+function edgeErrorResponse(
+  status: number,
+  code: string,
+  message: string,
+  region: string,
+  requestId: string,
+  extra: Record<string, unknown> = {}
+): NextResponse {
+  return new NextResponse(
+    JSON.stringify({
+      error: {
+        code,
+        message,
+        statusCode: status,
+        region,
+        requestId,
+        runtime: 'edge',
+        timestamp: new Date().toISOString(),
+        ...extra,
+      },
+    }),
+    {
+      status,
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Edge-Region': region,
+        'X-Edge-Request-Id': requestId,
+        ...(status === 429 ? { 'Retry-After': '60', 'X-RateLimit-Remaining': '0' } : {}),
+      },
+    }
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Middleware Handler
@@ -92,144 +128,113 @@ export async function middleware(request: NextRequest) {
 
   edgeLog('INFO', 'request_received', { method, path, region, requestId, chaos: chaosEnabled || undefined });
 
-  // ---- Rate Limiting (Edge-layer) ----
-  if (chaosEnabled && shouldFire(0.08)) {
+  // ---- 1. Edge Rate Limiting (429) ----
+  if (chaosEnabled && shouldFire(0.12)) {
     const latency = Date.now() - start;
     edgeLog('WARN', 'rate_limited', {
       method, path, region, status: 429, requestId, latency: `${latency}ms`,
-      reason: 'edge_rate_limit_exceeded',
+      reason: 'edge_rate_limit_exceeded', layer: 'edge-waf',
     });
-    return new NextResponse(
-      JSON.stringify({
-        error: {
-          code: 'EDGE_RATE_LIMITED',
-          message: 'Rate limit exceeded at edge. Please retry after 60 seconds.',
-          statusCode: 429,
-          region,
-          requestId,
-          runtime: 'edge',
-        },
-      }),
-      {
-        status: 429,
-        headers: {
-          'Content-Type': 'application/json',
-          'Retry-After': '60',
-          'X-Edge-Region': region,
-          'X-Edge-Request-Id': requestId,
-          'X-RateLimit-Remaining': '0',
-        },
-      }
-    );
+    return edgeErrorResponse(429, 'EDGE_RATE_LIMITED',
+      'Rate limit exceeded at edge. Too many requests from your IP. Please retry after 60 seconds.',
+      region, requestId);
   }
 
-  // ---- Geo-Blocking (Edge-layer) ----
-  if (chaosEnabled && GEO_BLOCKED_REGIONS.includes(region) && shouldFire(0.5)) {
+  // ---- 2. Geo-Blocking (403) ----
+  if (chaosEnabled && GEO_BLOCKED_REGIONS.includes(region) && shouldFire(0.6)) {
     const latency = Date.now() - start;
     edgeLog('WARN', 'geo_blocked', {
       method, path, region, status: 403, requestId, latency: `${latency}ms`,
-      reason: 'geographic_restriction',
+      reason: 'geographic_restriction', blockedRegion: region,
     });
-    return new NextResponse(
-      JSON.stringify({
-        error: {
-          code: 'EDGE_GEO_BLOCKED',
-          message: `Access denied from region ${region}. Geographic restrictions apply.`,
-          statusCode: 403,
-          region,
-          requestId,
-          runtime: 'edge',
-        },
-      }),
-      {
-        status: 403,
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Edge-Region': region,
-          'X-Edge-Request-Id': requestId,
-        },
-      }
-    );
+    return edgeErrorResponse(403, 'EDGE_GEO_BLOCKED',
+      `Access denied from region ${region}. Geographic restrictions apply per OFAC compliance.`,
+      region, requestId, { blockedRegion: region });
   }
 
-  // ---- Request Validation: Body Size (Edge-layer) ----
+  // ---- 3. Request Validation: Body Size (413) ----
   const contentLength = request.headers.get('content-length');
   if (contentLength && parseInt(contentLength) > 4 * 1024 * 1024) {
     const latency = Date.now() - start;
     edgeLog('ERROR', 'payload_too_large', {
       method, path, region, status: 413, requestId, latency: `${latency}ms`,
-      contentLength,
+      contentLength, maxAllowed: '4MB',
     });
-    return new NextResponse(
-      JSON.stringify({
-        error: {
-          code: 'EDGE_PAYLOAD_TOO_LARGE',
-          message: 'Request body exceeds the 4MB edge limit.',
-          statusCode: 413,
-          region,
-          requestId,
-          runtime: 'edge',
-        },
-      }),
-      {
-        status: 413,
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Edge-Region': region,
-          'X-Edge-Request-Id': requestId,
-        },
-      }
-    );
+    return edgeErrorResponse(413, 'EDGE_PAYLOAD_TOO_LARGE',
+      'Request body exceeds the 4MB edge function limit.',
+      region, requestId, { contentLength, maxAllowed: 4194304 });
   }
 
-  // ---- Edge Routing Error (502 Bad Gateway) ----
-  if (chaosEnabled && shouldFire(0.05)) {
-    // Simulate edge not being able to reach the origin
-    const waitMs = Math.round(800 + Math.random() * 2200); // 0.8-3s wait
+  // ---- 4. Edge Timeout (504 Gateway Timeout) ----
+  if (chaosEnabled && shouldFire(0.06)) {
+    // Simulate the edge waiting for origin and timing out
+    const waitMs = Math.round(3000 + Math.random() * 5000); // 3-8s simulated wait
+    await new Promise((r) => setTimeout(r, waitMs));
+    const latency = Date.now() - start;
+    edgeLog('ERROR', 'edge_timeout', {
+      method, path, region, status: 504, requestId, latency: `${latency}ms`,
+      reason: 'origin_response_timeout', waited: `${waitMs}ms`, threshold: '25s',
+    });
+    return edgeErrorResponse(504, 'EDGE_GATEWAY_TIMEOUT',
+      `Edge timed out waiting for origin server response after ${Math.round(waitMs / 1000)}s. The origin function may have exceeded its execution limit.`,
+      region, requestId, { waited: waitMs, threshold: 25000 });
+  }
+
+  // ---- 5. Edge Routing / Bad Gateway (502) ----
+  if (chaosEnabled && shouldFire(0.08)) {
+    const waitMs = Math.round(500 + Math.random() * 1500); // 0.5-2s
     await new Promise((r) => setTimeout(r, waitMs));
     const latency = Date.now() - start;
     edgeLog('ERROR', 'origin_unreachable', {
       method, path, region, status: 502, requestId, latency: `${latency}ms`,
       reason: 'edge_routing_failure', waited: `${waitMs}ms`,
+      vercelError: 'ROUTER_EXTERNAL_TARGET_ERROR',
     });
-    return new NextResponse(
-      JSON.stringify({
-        error: {
-          code: 'EDGE_BAD_GATEWAY',
-          message: 'Edge could not reach origin server. The upstream service may be unavailable.',
-          statusCode: 502,
-          region,
-          requestId,
-          runtime: 'edge',
-          waited: waitMs,
-        },
-      }),
-      {
-        status: 502,
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Edge-Region': region,
-          'X-Edge-Request-Id': requestId,
-        },
-      }
-    );
+    return edgeErrorResponse(502, 'EDGE_BAD_GATEWAY',
+      'Edge could not reach origin server. The upstream service returned an invalid response (ROUTER_EXTERNAL_TARGET_ERROR).',
+      region, requestId, { waited: waitMs, vercelError: 'ROUTER_EXTERNAL_TARGET_ERROR' });
+  }
+
+  // ---- 6. Edge Compute Exceeded (503) ----
+  if (chaosEnabled && shouldFire(0.04)) {
+    const latency = Date.now() - start;
+    edgeLog('ERROR', 'edge_compute_exceeded', {
+      method, path, region, status: 503, requestId, latency: `${latency}ms`,
+      reason: 'edge_function_cpu_limit', cpuTime: '50ms',
+    });
+    return edgeErrorResponse(503, 'EDGE_COMPUTE_EXCEEDED',
+      'Edge function exceeded the 50ms CPU time limit. The request could not be processed.',
+      region, requestId, { cpuTimeLimit: '50ms', layer: 'edge-isolate' });
+  }
+
+  // ---- 7. TLS Handshake Failure (525) ----
+  if (chaosEnabled && shouldFire(0.03)) {
+    const waitMs = Math.round(200 + Math.random() * 800);
+    await new Promise((r) => setTimeout(r, waitMs));
+    const latency = Date.now() - start;
+    edgeLog('ERROR', 'tls_handshake_failed', {
+      method, path, region, status: 525, requestId, latency: `${latency}ms`,
+      reason: 'ssl_handshake_failure', waited: `${waitMs}ms`,
+    });
+    return edgeErrorResponse(525, 'EDGE_TLS_HANDSHAKE_FAILED',
+      'SSL/TLS handshake failed between edge and origin. The origin server may have an expired or misconfigured certificate.',
+      region, requestId, { waited: waitMs, layer: 'edge-tls' });
   }
 
   // ---- Forward to origin with edge headers ----
   const latency = Date.now() - start;
   edgeLog('INFO', 'request_forwarded', { method, path, region, requestId, latency: `${latency}ms` });
 
-  // Clone the request headers and inject edge metadata
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set('x-edge-request-id', requestId);
   requestHeaders.set('x-edge-region', region);
   requestHeaders.set('x-edge-start-time', start.toString());
+  requestHeaders.set('x-edge-chaos', chaosEnabled ? 'true' : 'false');
 
   const response = NextResponse.next({
     request: { headers: requestHeaders },
   });
 
-  // Set edge headers on the response too
   response.headers.set('X-Edge-Region', region);
   response.headers.set('X-Edge-Request-Id', requestId);
   response.headers.set('X-Edge-Latency', `${latency}ms`);
@@ -237,7 +242,6 @@ export async function middleware(request: NextRequest) {
   return response;
 }
 
-// Only run middleware on API routes
 export const config = {
   matcher: '/api/:path*',
 };

@@ -42,26 +42,30 @@ function pick<T>(arr: T[]): T {
 }
 
 const ENDPOINTS: RequestDef[] = [
-  // 20% — trending (home page)
-  { weight: 20, method: "GET", label: "/api/trending", buildUrl: () => "/api/trending" },
-  // 15% — token list
-  { weight: 15, method: "GET", label: "/api/tokens", buildUrl: () => `/api/tokens?tab=${pick(["trending", "top", "new", "watchlist"])}&chain=${pick(["all", "ethereum", "solana"])}&limit=20` },
-  // 10% — collection list
-  { weight: 10, method: "GET", label: "/api/collections", buildUrl: () => `/api/collections?sort=${pick(["volume", "floor", "change1d"])}&chain=${pick(["all", "ethereum"])}&limit=20` },
-  // 10% — search
-  { weight: 10, method: "GET", label: "/api/search", buildUrl: () => `/api/search?q=${encodeURIComponent(pick(SEARCH_TERMS))}` },
-  // 8% — collection detail
-  { weight: 8, method: "GET", label: "/api/collections/[slug]", buildUrl: () => `/api/collections/${pick(COLLECTION_SLUGS)}` },
-  // 8% — collection items
-  { weight: 8, method: "GET", label: "/api/collections/[slug]/items", buildUrl: () => `/api/collections/${pick(COLLECTION_SLUGS)}/items?sort=${pick(["price", "rarity"])}&limit=8` },
-  // 8% — token detail
-  { weight: 8, method: "GET", label: "/api/tokens/[chain]/[address]", buildUrl: () => { const t = pick(TOKEN_ENTRIES); return `/api/tokens/${t.chain}/${t.address}`; } },
-  // 7% — chart
-  { weight: 7, method: "GET", label: "/api/tokens/.../chart", buildUrl: () => { const t = pick(TOKEN_ENTRIES); return `/api/tokens/${t.chain}/${t.address}/chart?timeframe=${pick(["1h", "1d", "7d"])}&interval=${pick(["1m", "5m", "1h"])}`; } },
-  // 7% — NFT detail
-  { weight: 7, method: "GET", label: "/api/nfts/[slug]/[tokenId]", buildUrl: () => `/api/nfts/${pick(COLLECTION_SLUGS)}/${pick(NFT_TOKEN_IDS)}` },
+  // 18% — trending (home page)
+  { weight: 18, method: "GET", label: "/api/trending", buildUrl: () => "/api/trending" },
+  // 13% — token list
+  { weight: 13, method: "GET", label: "/api/tokens", buildUrl: () => `/api/tokens?tab=${pick(["trending", "top", "new", "watchlist"])}&chain=${pick(["all", "ethereum", "solana"])}&limit=20` },
+  // 9% — collection list
+  { weight: 9, method: "GET", label: "/api/collections", buildUrl: () => `/api/collections?sort=${pick(["volume", "floor", "change1d"])}&chain=${pick(["all", "ethereum"])}&limit=20` },
+  // 9% — search
+  { weight: 9, method: "GET", label: "/api/search", buildUrl: () => `/api/search?q=${encodeURIComponent(pick(SEARCH_TERMS))}` },
+  // 7% — collection detail
+  { weight: 7, method: "GET", label: "/api/collections/[slug]", buildUrl: () => `/api/collections/${pick(COLLECTION_SLUGS)}` },
+  // 7% — collection items
+  { weight: 7, method: "GET", label: "/api/collections/[slug]/items", buildUrl: () => `/api/collections/${pick(COLLECTION_SLUGS)}/items?sort=${pick(["price", "rarity"])}&limit=8` },
+  // 7% — token detail
+  { weight: 7, method: "GET", label: "/api/tokens/[chain]/[address]", buildUrl: () => { const t = pick(TOKEN_ENTRIES); return `/api/tokens/${t.chain}/${t.address}`; } },
+  // 6% — chart
+  { weight: 6, method: "GET", label: "/api/tokens/.../chart", buildUrl: () => { const t = pick(TOKEN_ENTRIES); return `/api/tokens/${t.chain}/${t.address}/chart?timeframe=${pick(["1h", "1d", "7d"])}&interval=${pick(["1m", "5m", "1h"])}`; } },
+  // 6% — NFT detail
+  { weight: 6, method: "GET", label: "/api/nfts/[slug]/[tokenId]", buildUrl: () => `/api/nfts/${pick(COLLECTION_SLUGS)}/${pick(NFT_TOKEN_IDS)}` },
   // 5% — swap
   { weight: 5, method: "POST", label: "POST /api/.../swap", buildUrl: () => { const t = pick(TOKEN_ENTRIES); return `/api/tokens/${t.chain}/${t.address}/swap`; }, buildBody: () => ({ fromToken: pick(["ETH", "SOL"]), toToken: "TARGET", amount: Math.random() * 2 }) },
+  // 5% — edge health check (Edge Runtime)
+  { weight: 5, method: "GET", label: "/api/health [edge]", buildUrl: () => "/api/health" },
+  // 5% — edge cached prices (Edge Runtime)
+  { weight: 5, method: "GET", label: "/api/prices [edge]", buildUrl: () => `/api/prices${Math.random() < 0.5 ? `?symbols=${pick(["ETH,SOL", "BFS,DOG", "ETH", "SOL,ZEUS,ARB"])}` : ""}` },
   // 2% — intentional 404 (bad slug)
   { weight: 2, method: "GET", label: "/api/collections/404", buildUrl: () => `/api/collections/nonexistent-collection-${Date.now()}` },
 ];
