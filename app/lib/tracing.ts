@@ -478,12 +478,17 @@ export const MA = MarketplaceAttributes;
 
 /**
  * Reads x-edge-* headers injected by Edge Middleware and records them
- * as span attributes on the root span. Call in every Node.js route handler.
+ * as span attributes on the root span. Includes trace context IDs from
+ * the W3C traceparent header for edge → Node.js trace correlation.
+ *
+ * Call in every Node.js route handler after creating the root span.
  */
 export function recordEdgeHeaders(span: Span, headers: Headers): void {
   const region = headers.get('x-edge-region');
   const requestId = headers.get('x-edge-request-id');
   const startTime = headers.get('x-edge-start-time');
+  const edgeTraceId = headers.get('x-edge-trace-id');
+  const edgeSpanId = headers.get('x-edge-span-id');
 
   if (region) span.setAttribute(MA.EDGE_REGION, region);
   if (requestId) span.setAttribute(MA.EDGE_REQUEST_ID, requestId);
@@ -491,4 +496,7 @@ export function recordEdgeHeaders(span: Span, headers: Headers): void {
     const edgeLatency = Date.now() - parseInt(startTime);
     if (!isNaN(edgeLatency)) span.setAttribute(MA.EDGE_LATENCY_MS, edgeLatency);
   }
+  // Trace context propagated from edge middleware
+  if (edgeTraceId) span.setAttribute('marketplace.edge.trace_id', edgeTraceId);
+  if (edgeSpanId) span.setAttribute('marketplace.edge.span_id', edgeSpanId);
 }

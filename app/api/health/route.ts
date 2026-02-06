@@ -2,11 +2,8 @@
  * GET /api/health
  *
  * Lightweight health-check endpoint running on Edge Runtime.
- * Returns system status, edge region, timestamp, and version.
- * Integrates with busybox chaos: simulates degraded (503), edge crash (500),
- * and cold start delays.
- *
- * OTEL not supported on Edge — uses structured console.log.
+ * Parses traceparent from middleware for trace correlation.
+ * Generates its own spanId and logs with dd.trace_id/dd.span_id.
  */
 
 export const runtime = 'edge';
@@ -15,10 +12,23 @@ export const dynamic = 'force-dynamic';
 const EDGE_REGIONS = ['iad1', 'sfo1', 'cdg1', 'nrt1', 'sin1', 'gru1', 'syd1', 'lhr1'];
 const VERSION = '1.0.0';
 
-function edgeLog(level: string, op: string, meta: Record<string, unknown> = {}) {
+function generateSpanId(): string {
+  let id = '';
+  for (let i = 0; i < 16; i++) id += Math.floor(Math.random() * 16).toString(16);
+  return id;
+}
+
+function parseTraceparent(header: string | null): { traceId: string; parentSpanId: string } | null {
+  if (!header) return null;
+  const match = header.match(/^00-([a-f0-9]{32})-([a-f0-9]{16})-/);
+  return match ? { traceId: match[1], parentSpanId: match[2] } : null;
+}
+
+function edgeLog(level: string, op: string, traceId: string, spanId: string, meta: Record<string, unknown> = {}) {
   const d = new Date();
   const ts = `${d.getUTCHours().toString().padStart(2, '0')}:${d.getUTCMinutes().toString().padStart(2, '0')}:${d.getUTCSeconds().toString().padStart(2, '0')}.${d.getUTCMilliseconds().toString().padStart(3, '0')}`;
-  const metaStr = Object.entries(meta).filter(([, v]) => v != null).map(([k, v]) => `${k}=${v}`).join(' ');
+  const allMeta = { ...meta, 'dd.trace_id': traceId, 'dd.span_id': spanId };
+  const metaStr = Object.entries(allMeta).filter(([, v]) => v != null).map(([k, v]) => `${k}=${v}`).join(' ');
   const line = `[${ts}] [${level.padEnd(5)}] [edge-function  ] ${op}${metaStr ? ' | ' + metaStr : ''}`;
   if (level === 'ERROR') console.error(line);
   else if (level === 'WARN') console.warn(line);
@@ -31,23 +41,30 @@ export async function GET(request: Request) {
   const requestId = request.headers.get('x-edge-request-id') || 'unknown';
   const chaosEnabled = request.headers.get('x-edge-chaos') === 'true';
 
-  edgeLog('INFO', 'health_check_started', { region, requestId, chaos: chaosEnabled || undefined });
+  // Parse trace context from middleware
+  const traceCtx = parseTraceparent(request.headers.get('traceparent'));
+  const traceId = traceCtx?.traceId || request.headers.get('x-edge-trace-id') || '00000000000000000000000000000000';
+  const parentSpanId = traceCtx?.parentSpanId || request.headers.get('x-edge-span-id') || '0000000000000000';
+  const fnSpanId = generateSpanId();
+
+  edgeLog('INFO', 'health_check_started', traceId, fnSpanId, {
+    region, requestId, parentSpanId, chaos: chaosEnabled || undefined,
+  });
 
   // ---- Chaos: Edge function crash (500) ----
   if (chaosEnabled && Math.random() < 0.10) {
     const latency = Date.now() - start;
-    edgeLog('ERROR', 'health_check_crash', {
-      status: 500, region, requestId, latency: `${latency}ms`,
+    edgeLog('ERROR', 'health_check_crash', traceId, fnSpanId, {
+      status: 500, region, requestId, parentSpanId, duration: `${latency}ms`,
       reason: 'edge_function_uncaught_exception',
-      error: 'TypeError: Cannot read properties of undefined (reading \'status\')',
+      error: 'TypeError: Cannot read properties of undefined',
     });
     return new Response(
       JSON.stringify({
         error: {
-          code: 'EDGE_FUNCTION_CRASH',
-          message: 'Edge function encountered an uncaught exception during health check.',
-          statusCode: 500, region, requestId, runtime: 'edge',
-          stack: 'TypeError: Cannot read properties of undefined\n    at healthCheck (edge-function:27:15)\n    at GET (edge-function:42:10)',
+          code: 'EDGE_FUNCTION_CRASH', message: 'Edge function encountered an uncaught exception.',
+          statusCode: 500, region, requestId, traceId, spanId: fnSpanId, runtime: 'edge',
+          stack: 'TypeError: Cannot read properties of undefined\n    at healthCheck (edge-function:27:15)',
         },
       }),
       { status: 500, headers: { 'Content-Type': 'application/json', 'X-Edge-Region': region } }
@@ -56,10 +73,9 @@ export async function GET(request: Request) {
 
   // ---- Chaos: Edge cold start delay ----
   if (chaosEnabled && Math.random() < 0.15) {
-    const coldStartMs = Math.round(800 + Math.random() * 2200); // 0.8-3s
-    edgeLog('WARN', 'edge_cold_start', {
-      region, requestId, delay: `${coldStartMs}ms`,
-      reason: 'v8_isolate_initialization',
+    const coldStartMs = Math.round(800 + Math.random() * 2200);
+    edgeLog('WARN', 'edge_cold_start', traceId, fnSpanId, {
+      region, requestId, parentSpanId, delay: `${coldStartMs}ms`, reason: 'v8_isolate_initialization',
     });
     await new Promise((r) => setTimeout(r, coldStartMs));
   }
@@ -67,58 +83,44 @@ export async function GET(request: Request) {
   // ---- Chaos: Degraded state (503) ----
   if (chaosEnabled && Math.random() < 0.12) {
     const latency = Date.now() - start;
-    edgeLog('WARN', 'health_check_degraded', {
-      status: 503, region, requestId, latency: `${latency}ms`,
+    edgeLog('WARN', 'health_check_degraded', traceId, fnSpanId, {
+      status: 503, region, requestId, parentSpanId, duration: `${latency}ms`,
       reason: 'edge_infrastructure_degraded',
     });
     return new Response(
       JSON.stringify({
-        status: 'degraded',
-        region, timestamp: new Date().toISOString(), runtime: 'edge',
-        version: VERSION, requestId,
-        message: 'Edge infrastructure is experiencing degraded performance. Some requests may fail.',
-        checks: {
-          edge_network: 'degraded', origin_connectivity: 'partial', dns_resolution: 'ok',
-          tls_certificates: 'ok', kv_store: 'unreachable',
-        },
+        status: 'degraded', region, timestamp: new Date().toISOString(), runtime: 'edge',
+        version: VERSION, requestId, traceId, spanId: fnSpanId,
+        message: 'Edge infrastructure is experiencing degraded performance.',
+        checks: { edge_network: 'degraded', origin_connectivity: 'partial', dns_resolution: 'ok', tls_certificates: 'ok', kv_store: 'unreachable' },
       }),
-      {
-        status: 503,
-        headers: { 'Content-Type': 'application/json', 'X-Edge-Region': region, 'Retry-After': '30' },
-      }
+      { status: 503, headers: { 'Content-Type': 'application/json', 'X-Edge-Region': region, 'Retry-After': '30' } }
     );
   }
 
-  // ---- Normal: Healthy (2% natural degradation without chaos) ----
+  // ---- Normal: 2% natural degradation ----
   if (!chaosEnabled && Math.random() < 0.02) {
     const latency = Date.now() - start;
-    edgeLog('WARN', 'health_check_degraded', {
-      status: 503, region, requestId, latency: `${latency}ms`,
-      reason: 'transient_degradation',
+    edgeLog('WARN', 'health_check_degraded', traceId, fnSpanId, {
+      status: 503, region, requestId, parentSpanId, duration: `${latency}ms`, reason: 'transient_degradation',
     });
     return new Response(
-      JSON.stringify({ status: 'degraded', region, timestamp: new Date().toISOString(), runtime: 'edge', version: VERSION, requestId }),
+      JSON.stringify({ status: 'degraded', region, timestamp: new Date().toISOString(), runtime: 'edge', version: VERSION, requestId, traceId, spanId: fnSpanId }),
       { status: 503, headers: { 'Content-Type': 'application/json', 'X-Edge-Region': region, 'Retry-After': '30' } }
     );
   }
 
   const latency = Date.now() - start;
-  edgeLog('INFO', 'health_check_ok', {
-    status: 200, region, requestId, latency: `${latency}ms`, version: VERSION,
+  edgeLog('INFO', 'health_check_ok', traceId, fnSpanId, {
+    status: 200, region, requestId, parentSpanId, duration: `${latency}ms`, version: VERSION,
   });
 
   return new Response(
     JSON.stringify({
       status: 'ok', region, timestamp: new Date().toISOString(), runtime: 'edge',
-      version: VERSION, requestId,
-      checks: {
-        edge_network: 'ok', origin_connectivity: 'ok', dns_resolution: 'ok',
-        tls_certificates: 'ok', kv_store: 'ok',
-      },
+      version: VERSION, requestId, traceId, spanId: fnSpanId,
+      checks: { edge_network: 'ok', origin_connectivity: 'ok', dns_resolution: 'ok', tls_certificates: 'ok', kv_store: 'ok' },
     }),
-    {
-      status: 200,
-      headers: { 'Content-Type': 'application/json', 'X-Edge-Region': region, 'Cache-Control': 'no-cache, no-store' },
-    }
+    { status: 200, headers: { 'Content-Type': 'application/json', 'X-Edge-Region': region, 'Cache-Control': 'no-cache, no-store' } }
   );
 }
