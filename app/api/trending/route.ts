@@ -27,10 +27,11 @@ import { tokens } from "@/app/lib/data/tokens";
 import { ensurePriceEngine, getSparklineData } from "@/app/lib/price-engine";
 import { simulateLatency, simulateDbLatency } from "@/app/lib/utils";
 import { SpanStatusCode } from "@opentelemetry/api";
-import { apiTracer, dataTracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
+import { apiTracer, mongoTracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
 import { handleRouteError } from "@/app/lib/error-handler";
 import { maybeFault } from "@/app/lib/busybox";
 import { enrichCollection, enrichTokenFields, generateMarketplaceStats } from "@/app/lib/faker-enrich";
+import { log } from "@/app/lib/logger";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +44,8 @@ export async function GET() {
       [MA.HTTP_ROUTE]: '/api/trending',
     },
   }, async (rootSpan) => {
+    const _start = Date.now();
+    log.info('api-gateway', 'GET /api/trending', {});
     try {
       maybeFault('http500', { route: '/api/trending' });
       maybeFault('http502', { route: '/api/trending' });
@@ -51,7 +54,7 @@ export async function GET() {
 
       await simulateLatency(30, 80);
 
-      const featuredCollections = await withSpan(dataTracer, 'marketplace.trending.featured_collections', {
+      const featuredCollections = await withSpan(mongoTracer, 'marketplace.trending.featured_collections', {
         [MA.DB_OPERATION]: 'aggregate',
         [MA.DB_COLLECTION]: 'collections',
         [MA.DATA_SOURCE]: 'in-memory',
@@ -65,7 +68,7 @@ export async function GET() {
         return enriched;
       });
 
-      const topCollections = await withSpan(dataTracer, 'marketplace.trending.top_collections', {
+      const topCollections = await withSpan(mongoTracer, 'marketplace.trending.top_collections', {
         [MA.DB_OPERATION]: 'aggregate',
         [MA.DB_COLLECTION]: 'collections',
         [MA.DATA_SOURCE]: 'in-memory',
@@ -79,7 +82,7 @@ export async function GET() {
         return enriched;
       });
 
-      const trendingTokens = await withSpan(dataTracer, 'marketplace.trending.tokens', {
+      const trendingTokens = await withSpan(mongoTracer, 'marketplace.trending.tokens', {
         [MA.DB_OPERATION]: 'aggregate',
         [MA.DB_COLLECTION]: 'tokens',
         [MA.DATA_SOURCE]: 'in-memory',
@@ -109,6 +112,15 @@ export async function GET() {
       rootSpan.setAttribute(MA.HTTP_STATUS_CODE, 200);
       rootSpan.setAttribute(MA.RESPONSE_ITEMS, featuredCollections.length + topCollections.length + trendingTokens.length);
       rootSpan.setStatus({ code: SpanStatusCode.OK });
+      const totalItems = featuredCollections.length + topCollections.length + trendingTokens.length;
+      log.info('api-gateway', 'trending_aggregated', {
+        status: 200, duration: `${Date.now() - _start}ms`,
+        featured: featuredCollections.map(c => c.name).join(', '),
+        topFloor: `${topCollections[0]?.name} @ ${topCollections[0]?.floorPrice.toFixed(2)} ${topCollections[0]?.floorCurrency}`,
+        hotToken: `${trendingTokens[0]?.symbol} ${trendingTokens[0]?.change1d >= 0 ? '+' : ''}${trendingTokens[0]?.change1d.toFixed(1)}%`,
+        ethPrice: `$${marketplaceStats.ethPrice.toFixed(2)}`, gas: `${marketplaceStats.gasPrice.toFixed(1)} gwei`,
+        totalItems,
+      });
       return NextResponse.json({ featuredCollections, trendingTokens, topCollections, marketplaceStats });
     } catch (error) {
       return await handleRouteError(error, rootSpan);

@@ -19,10 +19,11 @@ import { ensurePriceEngine } from "@/app/lib/price-engine";
 import { simulateLatency, simulateDbLatency } from "@/app/lib/utils";
 import { SwapQuote } from "@/app/lib/data/types";
 import { SpanStatusCode } from "@opentelemetry/api";
-import { apiTracer, dataTracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
+import { apiTracer, mongoTracer, chainlinkTracer, uniswapTracer, gasTracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
 import { handleRouteError } from "@/app/lib/error-handler";
 import { maybeFault } from "@/app/lib/busybox";
 import { ValidationError, NotFoundError, UnprocessableError } from "@/app/lib/errors";
+import { log } from "@/app/lib/logger";
 
 export const dynamic = "force-dynamic";
 
@@ -40,6 +41,8 @@ export async function POST(
       [MA.CHAIN]: chain, [MA.TOKEN_ADDRESS]: address,
     },
   }, async (rootSpan) => {
+    const _start = Date.now();
+    log.info('api-gateway', 'POST /api/tokens/[chain]/[address]/swap', { chain, address });
     try {
       maybeFault('http500', { route: '/api/tokens/[chain]/[address]/swap', chain, address });
       maybeFault('http502', { route: '/api/tokens/[chain]/[address]/swap' });
@@ -81,7 +84,7 @@ export async function POST(
       rootSpan.setAttribute(MA.SWAP_FROM_AMOUNT, amount);
 
       // --- Look up target token ---
-      const targetToken = await withSpan(dataTracer, 'marketplace.swap.token_lookup', {
+      const targetToken = await withSpan(mongoTracer, 'marketplace.swap.token_lookup', {
         [MA.CHAIN]: chain, [MA.TOKEN_ADDRESS]: address,
         [MA.DB_OPERATION]: 'read', [MA.DB_COLLECTION]: 'tokens', [MA.DATA_SOURCE]: 'in-memory',
       }, async (span) => {
@@ -104,9 +107,9 @@ export async function POST(
       maybeFault('http422', { route: '/api/tokens/[chain]/[address]/swap', token: targetToken.symbol });
 
       // --- Resolve prices ---
-      const { toPrice, fromValueUsd } = await withSpan(dataTracer, 'marketplace.swap.price_resolution', {
+      const { toPrice, fromValueUsd } = await withSpan(chainlinkTracer, 'marketplace.swap.price_resolution', {
         [MA.SWAP_FROM_TOKEN]: fromToken, [MA.TOKEN_SYMBOL]: targetToken.symbol,
-        [MA.DB_OPERATION]: 'read', [MA.DATA_SOURCE]: 'oracle',
+        [MA.DB_OPERATION]: 'read', [MA.DATA_SOURCE]: 'chainlink-oracle',
       }, async (span) => {
         const delayMs = await simulateDbLatency('external_api');
         span.setAttribute(MA.DB_DURATION_MS, delayMs);
@@ -122,9 +125,9 @@ export async function POST(
       rootSpan.setAttribute(MA.SWAP_AMOUNT_USD, fromValueUsd);
 
       // --- Compute price impact + fees ---
-      const { priceImpact, fee, toAmount } = await withSpan(dataTracer, 'marketplace.swap.impact_calculation', {
+      const { priceImpact, fee, toAmount } = await withSpan(uniswapTracer, 'marketplace.swap.impact_calculation', {
         [MA.SWAP_AMOUNT_USD]: fromValueUsd,
-        [MA.DB_OPERATION]: 'aggregate', [MA.DATA_SOURCE]: 'liquidity_pool',
+        [MA.DB_OPERATION]: 'aggregate', [MA.DATA_SOURCE]: 'uniswap-v3',
       }, async (span) => {
         const delayMs = await simulateDbLatency('db_aggregate');
         span.setAttribute(MA.DB_DURATION_MS, delayMs);
@@ -148,8 +151,8 @@ export async function POST(
       });
 
       // --- Assemble quote ---
-      const quote = await withSpan(dataTracer, 'marketplace.swap.quote_assembly', {
-        [MA.DB_OPERATION]: 'read', [MA.DATA_SOURCE]: 'gas_oracle',
+      const quote = await withSpan(gasTracer, 'marketplace.swap.quote_assembly', {
+        [MA.DB_OPERATION]: 'read', [MA.DATA_SOURCE]: 'etherscan-gas',
       }, async (span) => {
         const delayMs = await simulateDbLatency('cache_hit');
         span.setAttribute(MA.DB_DURATION_MS, delayMs);
@@ -173,6 +176,15 @@ export async function POST(
       rootSpan.setAttribute(MA.HTTP_STATUS_CODE, 200);
       rootSpan.setAttribute(MA.RESPONSE_ITEMS, 1);
       rootSpan.setStatus({ code: SpanStatusCode.OK });
+      log.info('data-service', 'swap_quote_generated', {
+        status: 200, duration: `${Date.now() - _start}ms`,
+        pair: `${quote.fromToken}/${quote.toToken}`, chain,
+        inputAmount: `${quote.fromAmount} ${quote.fromToken}`,
+        outputAmount: `${quote.toAmount.toFixed(2)} ${quote.toToken}`,
+        priceImpact: `${quote.priceImpact.toFixed(2)}%`,
+        fee: `$${quote.fee.toFixed(4)}`, gas: `${quote.estimatedGas.toFixed(4)} ${chain === 'solana' ? 'SOL' : 'ETH'}`,
+        route: quote.route, expiresIn: '30s',
+      });
       return NextResponse.json(quote);
     } catch (error) {
       return await handleRouteError(error, rootSpan);

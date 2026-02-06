@@ -11,6 +11,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getBusyboxState, setBusyboxState } from "@/app/lib/busybox";
 import { tracer, withSpan } from "@/app/lib/tracing";
+import { log } from "@/app/lib/logger";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,7 @@ export async function GET() {
     const state = getBusyboxState();
     span.setAttribute('marketplace.busybox.enabled', state.enabled);
     span.setAttribute('marketplace.busybox.error_rate', state.errorRate);
+    log.debug('admin', 'busybox.get', { enabled: state.enabled, errorRate: `${Math.round(state.errorRate * 100)}%` });
     return NextResponse.json(state);
   });
 }
@@ -30,8 +32,10 @@ export async function POST(request: NextRequest) {
       const updated = setBusyboxState(body);
       span.setAttribute('marketplace.busybox.enabled', updated.enabled);
       span.setAttribute('marketplace.busybox.error_rate', updated.errorRate);
+      log.info('admin', 'busybox.set', { enabled: updated.enabled, errorRate: `${Math.round(updated.errorRate * 100)}%` });
       return NextResponse.json(updated);
     } catch {
+      log.error('admin', 'busybox.set', { error: 'Invalid JSON body' });
       return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
     }
   });

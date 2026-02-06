@@ -19,11 +19,12 @@ import { tokens } from "@/app/lib/data/tokens";
 import { ensurePriceEngine, getSparklineData } from "@/app/lib/price-engine";
 import { simulateLatency, simulateDbLatency } from "@/app/lib/utils";
 import { SpanStatusCode } from "@opentelemetry/api";
-import { apiTracer, dataTracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
+import { apiTracer, mongoTracer, redisTracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
 import { handleRouteError } from "@/app/lib/error-handler";
 import { maybeFault } from "@/app/lib/busybox";
 import { ValidationError } from "@/app/lib/errors";
 import { enrichTokenFields } from "@/app/lib/faker-enrich";
+import { log } from "@/app/lib/logger";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +49,8 @@ export async function GET(request: NextRequest) {
       [MA.FILTER_ORDER]: order, [MA.PAGINATION_LIMIT]: limit, [MA.PAGINATION_OFFSET]: offset,
     },
   }, async (rootSpan) => {
+    const _start = Date.now();
+    log.info('api-gateway', 'GET /api/tokens', { tab, chain, sort, order, limit, offset });
     try {
       maybeFault('http500', { route: '/api/tokens' });
       maybeFault('http502', { route: '/api/tokens' });
@@ -63,7 +66,7 @@ export async function GET(request: NextRequest) {
 
       await simulateLatency(30, 100);
 
-      let filtered = await withSpan(dataTracer, 'marketplace.tokens.filter', {
+      let filtered = await withSpan(mongoTracer, 'marketplace.tokens.filter', {
         [MA.FILTER_CHAIN]: chain, [MA.FILTER_FDV_MIN]: fdvMin, [MA.FILTER_FDV_MAX]: fdvMax,
         [MA.DB_OPERATION]: 'scan', [MA.DB_COLLECTION]: 'tokens', [MA.DATA_SOURCE]: 'in-memory',
       }, async (span) => {
@@ -76,7 +79,7 @@ export async function GET(request: NextRequest) {
         return result;
       });
 
-      filtered = await withSpan(dataTracer, 'marketplace.tokens.tab_sort', {
+      filtered = await withSpan(mongoTracer, 'marketplace.tokens.tab_sort', {
         [MA.FILTER_TAB]: tab, [MA.FILTER_SORT]: sort, [MA.FILTER_ORDER]: order,
         [MA.DB_OPERATION]: 'aggregate', [MA.DATA_SOURCE]: 'in-memory',
       }, async (span) => {
@@ -111,7 +114,7 @@ export async function GET(request: NextRequest) {
 
       const total = filtered.length;
       const hasMore = offset + limit < total;
-      const paginated = await withSpan(dataTracer, 'marketplace.tokens.paginate', {
+      const paginated = await withSpan(mongoTracer, 'marketplace.tokens.paginate', {
         [MA.PAGINATION_OFFSET]: offset, [MA.PAGINATION_LIMIT]: limit,
         [MA.PAGINATION_TOTAL]: total, [MA.PAGINATION_HAS_MORE]: hasMore,
         [MA.DB_OPERATION]: 'read',
@@ -123,7 +126,7 @@ export async function GET(request: NextRequest) {
         return page;
       });
 
-      const withSparklineData = await withSpan(dataTracer, 'marketplace.tokens.sparkline_extraction', {
+      const withSparklineData = await withSpan(redisTracer, 'marketplace.tokens.sparkline_extraction', {
         [MA.RESULT_COUNT]: paginated.length,
         [MA.DATA_SOURCE]: 'redis',
       }, async (span) => {
@@ -146,6 +149,12 @@ export async function GET(request: NextRequest) {
       rootSpan.setAttribute(MA.HTTP_STATUS_CODE, 200);
       rootSpan.setAttribute(MA.RESPONSE_ITEMS, withSparklineData.length);
       rootSpan.setStatus({ code: SpanStatusCode.OK });
+      const topMover = withSparklineData[0];
+      log.info('data-service', 'tokens_listed', {
+        status: 200, duration: `${Date.now() - _start}ms`,
+        tab, chain, results: withSparklineData.length, total,
+        topMover: topMover ? `${topMover.symbol} $${topMover.price < 1 ? topMover.price.toFixed(6) : topMover.price.toFixed(2)} (${topMover.change1d >= 0 ? '+' : ''}${topMover.change1d.toFixed(1)}%)` : undefined,
+      });
       return NextResponse.json({ data: withSparklineData, total, limit, offset, hasMore });
     } catch (error) {
       return await handleRouteError(error, rootSpan);

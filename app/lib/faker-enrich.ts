@@ -9,8 +9,9 @@
 
 import { faker } from "@faker-js/faker";
 import { Collection } from "./data/types";
-import { enrichTracer, withSpan, MarketplaceAttributes as MA } from "./tracing";
+import { alchemyTracer, coingeckoTracer, chainlinkTracer, etherscanTracer, reservoirTracer, withSpan, MarketplaceAttributes as MA } from "./tracing";
 import { simulateDbLatency } from "./utils";
+import { log } from "./logger";
 
 // ---- Price / stat fluctuation helpers ----
 
@@ -22,14 +23,15 @@ export function fluctuate(value: number, maxPct: number = 0.5): number {
 
 /** Apply fluctuations to a collection to simulate live db data */
 export async function enrichCollection(c: Collection): Promise<Collection & { recentBuyers: string[] }> {
-  return withSpan(enrichTracer, 'marketplace.enrichment.collection', {
-    [MA.ENRICHMENT_SOURCE]: 'faker',
+  return withSpan(alchemyTracer, 'marketplace.enrichment.collection', {
+    [MA.ENRICHMENT_SOURCE]: 'alchemy',
     [MA.ENRICHMENT_FIELDS]: 6,
     [MA.COLLECTION_SLUG]: c.slug,
-    [MA.DATA_SOURCE]: 'faker',
+    [MA.DATA_SOURCE]: 'alchemy-nft-api',
   }, async (span) => {
     const delayMs = await simulateDbLatency('enrichment');
     span.setAttribute(MA.DB_DURATION_MS, delayMs);
+    log.debug('enrichment', 'collection_enriched', { slug: c.slug, floor: `${c.floorPrice.toFixed(2)} ${c.floorCurrency}`, owners: c.ownerCount, delay: `${delayMs}ms` });
 
     faker.seed(undefined);
     const result = {
@@ -73,13 +75,14 @@ export interface MarketplaceStats {
 
 /** Generate dynamic marketplace stats (ETH price, gas, etc.) */
 export async function generateMarketplaceStats(): Promise<MarketplaceStats> {
-  return withSpan(enrichTracer, 'marketplace.enrichment.marketplace_stats', {
-    [MA.ENRICHMENT_SOURCE]: 'faker',
-    [MA.DATA_SOURCE]: 'oracle',
+  return withSpan(chainlinkTracer, 'marketplace.enrichment.marketplace_stats', {
+    [MA.ENRICHMENT_SOURCE]: 'chainlink',
+    [MA.DATA_SOURCE]: 'chainlink-oracle',
     [MA.ENRICHMENT_FIELDS]: 4,
   }, async (span) => {
     const delayMs = await simulateDbLatency('external_api');
     span.setAttribute(MA.DB_DURATION_MS, delayMs);
+    log.debug('enrichment', 'marketplace_stats_fetched', { source: 'price_oracle', delay: `${delayMs}ms` });
 
     faker.seed(undefined);
     const stats = {
@@ -108,13 +111,14 @@ export interface EnrichedTokenFields {
 
 /** Apply price fluctuations to a token to simulate live market data */
 export async function enrichTokenFields(t: EnrichedTokenFields): Promise<EnrichedTokenFields> {
-  return withSpan(enrichTracer, 'marketplace.enrichment.token', {
-    [MA.ENRICHMENT_SOURCE]: 'faker',
+  return withSpan(coingeckoTracer, 'marketplace.enrichment.token', {
+    [MA.ENRICHMENT_SOURCE]: 'coingecko',
     [MA.ENRICHMENT_FIELDS]: 7,
-    [MA.DATA_SOURCE]: 'faker',
+    [MA.DATA_SOURCE]: 'coingecko-api',
   }, async (span) => {
     const delayMs = await simulateDbLatency('enrichment');
     span.setAttribute(MA.DB_DURATION_MS, delayMs);
+    log.debug('enrichment', 'token_price_enriched', { price: `$${t.price < 1 ? t.price.toFixed(6) : t.price.toFixed(2)}`, delay: `${delayMs}ms` });
 
     faker.seed(undefined);
     const newPrice = fluctuate(t.price, 1.5);
@@ -147,14 +151,15 @@ export interface RecentTransaction {
 }
 
 export async function generateRecentTransactions(symbol: string, price: number, count: number = 5): Promise<RecentTransaction[]> {
-  return withSpan(enrichTracer, 'marketplace.enrichment.transactions', {
-    [MA.ENRICHMENT_SOURCE]: 'faker',
-    [MA.DATA_SOURCE]: 'blockchain_index',
+  return withSpan(etherscanTracer, 'marketplace.enrichment.transactions', {
+    [MA.ENRICHMENT_SOURCE]: 'etherscan',
+    [MA.DATA_SOURCE]: 'etherscan-api',
     [MA.TOKEN_SYMBOL]: symbol,
     [MA.DB_OPERATION]: 'read',
   }, async (span) => {
     const delayMs = await simulateDbLatency('db_read');
     span.setAttribute(MA.DB_DURATION_MS, delayMs);
+    log.debug('enrichment', 'recent_transactions_generated', { token: symbol, count, pricePerUnit: `$${price < 1 ? price.toFixed(6) : price.toFixed(2)}`, delay: `${delayMs}ms` });
 
     faker.seed(undefined);
     const now = Date.now();

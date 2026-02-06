@@ -17,9 +17,10 @@ import { ensurePriceEngine } from "@/app/lib/price-engine";
 import { simulateLatency, simulateDbLatency } from "@/app/lib/utils";
 import { SearchResult } from "@/app/lib/data/types";
 import { SpanStatusCode } from "@opentelemetry/api";
-import { apiTracer, searchTracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
+import { apiTracer, esTracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
 import { handleRouteError } from "@/app/lib/error-handler";
 import { maybeFault } from "@/app/lib/busybox";
+import { log } from "@/app/lib/logger";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +36,8 @@ export async function GET(request: NextRequest) {
       [MA.SEARCH_QUERY]: q,
     },
   }, async (rootSpan) => {
+    const _start = Date.now();
+    log.info('search-engine', 'GET /api/search', { query: q || '(empty)' });
     try {
       maybeFault('http500', { route: '/api/search', query: q });
       maybeFault('http502', { route: '/api/search' });
@@ -51,7 +54,7 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ collections: [], tokens: [] } as SearchResult);
       }
 
-      const matchedCollections = await withSpan(searchTracer, 'marketplace.search.collections', {
+      const matchedCollections = await withSpan(esTracer, 'marketplace.search.collections', {
         [MA.SEARCH_QUERY]: q,
         [MA.DB_OPERATION]: 'scan', [MA.DB_COLLECTION]: 'collections', [MA.DATA_SOURCE]: 'elasticsearch',
       }, async (span) => {
@@ -66,7 +69,7 @@ export async function GET(request: NextRequest) {
         return results;
       });
 
-      const matchedTokens = await withSpan(searchTracer, 'marketplace.search.tokens', {
+      const matchedTokens = await withSpan(esTracer, 'marketplace.search.tokens', {
         [MA.SEARCH_QUERY]: q,
         [MA.DB_OPERATION]: 'scan', [MA.DB_COLLECTION]: 'tokens', [MA.DATA_SOURCE]: 'elasticsearch',
       }, async (span) => {
@@ -89,6 +92,12 @@ export async function GET(request: NextRequest) {
       rootSpan.setAttribute(MA.RESPONSE_ITEMS, totalHits);
 
       rootSpan.setStatus({ code: SpanStatusCode.OK });
+      log.info('search-engine', 'search_completed', {
+        status: 200, duration: `${Date.now() - _start}ms`,
+        query: q, totalHits: totalHits,
+        collections: matchedCollections.length > 0 ? matchedCollections.map(c => c.name).join(', ') : 'none',
+        tokens: matchedTokens.length > 0 ? matchedTokens.map(t => `${t.symbol} $${t.price < 1 ? t.price.toFixed(4) : t.price.toFixed(2)}`).join(', ') : 'none',
+      });
       return NextResponse.json({ collections: matchedCollections, tokens: matchedTokens } as SearchResult);
     } catch (error) {
       return await handleRouteError(error, rootSpan);

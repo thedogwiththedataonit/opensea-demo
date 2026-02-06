@@ -2,41 +2,84 @@
  * OpenSea Marketplace — Tracing Utilities
  *
  * Centralized OpenTelemetry instrumentation module for the marketplace API.
- * Provides multiple service-scoped tracers (simulating a microservice architecture),
- * typed span wrappers with automatic error span creation, and domain-specific
- * semantic attribute constants following the `marketplace.*` namespace convention.
+ * Provides 12 service-scoped tracers simulating real third-party integrations.
+ * Each tracer appears as a distinct service node in Datadog's Service Map.
  *
  * Service tracers:
- *   apiTracer        — opensea-api-gateway    (root HTTP handler spans)
- *   dataTracer       — opensea-data-service   (data lookups, filters, sorts)
- *   enrichTracer     — opensea-enrichment     (faker enrichment, comments, holders)
- *   searchTracer     — opensea-search-engine  (search queries)
- *   priceTracer      — opensea-price-engine   (sparkline / OHLC computations)
+ *   apiTracer        — opensea-api-gateway    (API gateway / BFF layer)
+ *   mongoTracer      — mongodb-atlas          (database queries)
+ *   esTracer         — elasticsearch          (full-text search)
+ *   redisTracer      — redis-cache            (sparkline / OHLC cache)
+ *   chainlinkTracer  — chainlink-oracle       (price oracle feeds)
+ *   uniswapTracer    — uniswap-router         (DEX liquidity / swap routing)
+ *   alchemyTracer    — alchemy-nft-api        (NFT enrichment + holder data)
+ *   coingeckoTracer  — coingecko-api          (token price enrichment)
+ *   etherscanTracer  — etherscan-api          (transaction history)
+ *   reservoirTracer  — reservoir-api          (social / comments data)
+ *   gasTracer        — etherscan-gas          (gas price oracle)
+ *   ddTracer         — datadog-apm            (error tracking / observability)
  */
 
 import { trace, Span, SpanStatusCode, Attributes } from '@opentelemetry/api';
 
 // ---------------------------------------------------------------------------
-// Service-Scoped Tracer Instances
+// Service-Scoped Tracer Instances (12 third-party services)
 // ---------------------------------------------------------------------------
 
-/** @deprecated Use service-specific tracers below. Kept for backward compat. */
+/** @deprecated Use service-specific tracers below. Kept for admin route compat. */
 export const tracer = trace.getTracer('opensea-marketplace');
 
-/** Root HTTP handler spans — API gateway layer */
+/** Root HTTP handler spans — API gateway / BFF layer */
 export const apiTracer = trace.getTracer('opensea-api-gateway');
 
-/** Data lookups, filtering, sorting, pagination */
-export const dataTracer = trace.getTracer('opensea-data-service');
+// ---- Database ----
+/** MongoDB Atlas — collection/token/NFT lookups, filters, sorts, pagination */
+export const mongoTracer = trace.getTracer('mongodb-atlas');
 
-/** Faker enrichment, comments, holders, transactions generation */
-export const enrichTracer = trace.getTracer('opensea-enrichment');
+// ---- Search ----
+/** Elasticsearch — full-text search across collections and tokens */
+export const esTracer = trace.getTracer('elasticsearch');
 
-/** Search queries across collections and tokens */
-export const searchTracer = trace.getTracer('opensea-search-engine');
+// ---- Cache ----
+/** Redis Cache — sparkline data, OHLC candles, hot data */
+export const redisTracer = trace.getTracer('redis-cache');
 
-/** Sparkline, OHLC, and price computation */
-export const priceTracer = trace.getTracer('opensea-price-engine');
+// ---- Blockchain / DeFi ----
+/** Chainlink Oracle — ETH/USD price feeds, gas price oracle */
+export const chainlinkTracer = trace.getTracer('chainlink-oracle');
+
+/** Uniswap Router — DEX liquidity pool queries, price impact calculation */
+export const uniswapTracer = trace.getTracer('uniswap-router');
+
+// ---- External APIs ----
+/** Alchemy NFT API — NFT enrichment, holder data, collection metadata */
+export const alchemyTracer = trace.getTracer('alchemy-nft-api');
+
+/** CoinGecko API — token price enrichment, market data */
+export const coingeckoTracer = trace.getTracer('coingecko-api');
+
+/** Etherscan API — transaction history, contract verification */
+export const etherscanTracer = trace.getTracer('etherscan-api');
+
+/** Reservoir API — social data, comments, community metrics */
+export const reservoirTracer = trace.getTracer('reservoir-api');
+
+/** Etherscan Gas Oracle — gas price estimation for transactions */
+export const gasTracer = trace.getTracer('etherscan-gas');
+
+// ---- Observability ----
+/** Datadog APM — error tracking, exception recording */
+export const ddTracer = trace.getTracer('datadog-apm');
+
+// ---- Backward compatibility aliases ----
+/** @deprecated Use mongoTracer */
+export const dataTracer = mongoTracer;
+/** @deprecated Use alchemyTracer or coingeckoTracer */
+export const enrichTracer = alchemyTracer;
+/** @deprecated Use esTracer */
+export const searchTracer = esTracer;
+/** @deprecated Use redisTracer */
+export const priceTracer = redisTracer;
 
 // ---------------------------------------------------------------------------
 // Error Span Name Mapping

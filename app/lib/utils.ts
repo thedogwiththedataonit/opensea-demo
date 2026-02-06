@@ -8,6 +8,7 @@
 
 import { apiTracer, MarketplaceAttributes as MA } from './tracing';
 import { shouldInjectFault } from './busybox';
+import { log } from './logger';
 
 // ---------------------------------------------------------------------------
 // DB Latency Profiles
@@ -76,6 +77,7 @@ export async function simulateLatency(min: number = 20, max: number = 80): Promi
     async (span) => {
       if (isTimeout) {
         span.setAttribute(MA.BUSYBOX_FAULT_TYPE, 'timeout');
+        log.warn('api-gateway', 'latency_simulation', { injected: 'timeout', delay: `${delay}ms` });
       }
       await new Promise((resolve) => setTimeout(resolve, delay));
       span.end();

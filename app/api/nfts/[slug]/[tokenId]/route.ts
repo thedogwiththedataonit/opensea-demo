@@ -16,11 +16,12 @@ import { nftsByCollection } from "@/app/lib/data/collections";
 import { ensurePriceEngine } from "@/app/lib/price-engine";
 import { simulateLatency, simulateDbLatency } from "@/app/lib/utils";
 import { SpanStatusCode } from "@opentelemetry/api";
-import { apiTracer, dataTracer, enrichTracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
+import { apiTracer, mongoTracer, reservoirTracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
 import { handleRouteError } from "@/app/lib/error-handler";
 import { maybeFault } from "@/app/lib/busybox";
 import { NotFoundError } from "@/app/lib/errors";
 import { faker } from "@faker-js/faker";
+import { log } from "@/app/lib/logger";
 
 export const dynamic = "force-dynamic";
 
@@ -85,6 +86,8 @@ export async function GET(
       [MA.COLLECTION_SLUG]: slug, [MA.NFT_TOKEN_ID]: tokenId,
     },
   }, async (rootSpan) => {
+    const _start = Date.now();
+    log.info('api-gateway', 'GET /api/nfts/[slug]/[tokenId]', { slug, tokenId });
     try {
       maybeFault('http500', { route: '/api/nfts/[slug]/[tokenId]', slug, tokenId });
       maybeFault('http502', { route: '/api/nfts/[slug]/[tokenId]' });
@@ -93,7 +96,7 @@ export async function GET(
 
       await simulateLatency(25, 70);
 
-      const nfts = await withSpan(dataTracer, 'marketplace.nft.collection_lookup', {
+      const nfts = await withSpan(mongoTracer, 'marketplace.nft.collection_lookup', {
         [MA.COLLECTION_SLUG]: slug,
         [MA.DB_OPERATION]: 'read', [MA.DB_COLLECTION]: 'nfts', [MA.DATA_SOURCE]: 'in-memory',
       }, async (span) => {
@@ -108,7 +111,7 @@ export async function GET(
         throw new NotFoundError('COLLECTION_NOT_FOUND', `Collection "${slug}" not found`, { slug });
       }
 
-      const nft = await withSpan(dataTracer, 'marketplace.nft.token_lookup', {
+      const nft = await withSpan(mongoTracer, 'marketplace.nft.token_lookup', {
         [MA.COLLECTION_SLUG]: slug, [MA.NFT_TOKEN_ID]: tokenId,
         [MA.DB_OPERATION]: 'read', [MA.DB_COLLECTION]: 'nfts', [MA.DATA_SOURCE]: 'in-memory',
       }, async (span) => {
@@ -130,10 +133,10 @@ export async function GET(
       }
 
       // Generate dynamic comments via faker.js
-      const comments = await withSpan(enrichTracer, 'marketplace.nft.comments_generation', {
+      const comments = await withSpan(reservoirTracer, 'marketplace.nft.comments_generation', {
         [MA.COLLECTION_SLUG]: slug, [MA.NFT_TOKEN_ID]: tokenId,
-        [MA.ENRICHMENT_SOURCE]: 'faker', [MA.DB_OPERATION]: 'read',
-        [MA.DB_COLLECTION]: 'comments', [MA.DATA_SOURCE]: 'social_index',
+        [MA.ENRICHMENT_SOURCE]: 'reservoir', [MA.DB_OPERATION]: 'read',
+        [MA.DB_COLLECTION]: 'comments', [MA.DATA_SOURCE]: 'reservoir-api',
       }, async (span) => {
         const delayMs = await simulateDbLatency('db_read');
         span.setAttribute(MA.DB_DURATION_MS, delayMs);
@@ -147,6 +150,15 @@ export async function GET(
       rootSpan.setAttribute(MA.HTTP_STATUS_CODE, 200);
       rootSpan.setAttribute(MA.RESPONSE_ITEMS, 1);
       rootSpan.setStatus({ code: SpanStatusCode.OK });
+      log.info('data-service', 'nft_viewed', {
+        status: 200, duration: `${Date.now() - _start}ms`,
+        nft: nft.name, collection: slug, tokenId,
+        owner: nft.owner, chain: nft.chain, rarity: `#${nft.rarity}`,
+        listed: nft.isListed,
+        price: nft.isListed && nft.currentPrice ? `${nft.currentPrice.toFixed(4)} ${nft.currentCurrency}` : 'unlisted',
+        lastSale: nft.lastSalePrice ? `${nft.lastSalePrice.toFixed(4)} ${nft.lastSaleCurrency}` : 'none',
+        traits: nft.properties.length, activity: nft.activityHistory.length, comments: comments.length,
+      });
       return NextResponse.json({ ...nft, comments });
     } catch (error) {
       return await handleRouteError(error, rootSpan);

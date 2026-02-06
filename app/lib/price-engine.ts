@@ -10,9 +10,10 @@
 import { tokens } from "./data/tokens";
 import { collections } from "./data/collections";
 import { PricePoint } from "./data/types";
-import { priceTracer, withErrorSpan, MarketplaceAttributes as MA } from "./tracing";
+import { redisTracer, withErrorSpan, MarketplaceAttributes as MA } from "./tracing";
 import { maybeFault } from "./busybox";
 import { SpanStatusCode } from "@opentelemetry/api";
+import { log } from "./logger";
 
 // Module-scoped flag to ensure we only start the engine once
 let engineStarted = false;
@@ -23,6 +24,7 @@ let engineStarted = false;
 export function ensurePriceEngine(): void {
   if (engineStarted) return;
   engineStarted = true;
+  log.info('price-engine', 'engine_started', { interval: '3000ms', tokens: tokens.length, collections: collections.length });
 
   setInterval(() => {
     const now = Date.now();
@@ -59,7 +61,7 @@ export function ensurePriceEngine(): void {
  * error child span with stack trace.
  */
 export async function getSparklineData(priceHistory: PricePoint[], points: number = 20): Promise<PricePoint[]> {
-  return priceTracer.startActiveSpan('marketplace.price.sparkline', {
+  return redisTracer.startActiveSpan('marketplace.price.sparkline', {
     attributes: {
       [MA.SPARKLINE_POINTS_REQUESTED]: points,
       [MA.SPARKLINE_HISTORY_SIZE]: priceHistory.length,
@@ -96,8 +98,12 @@ export async function getSparklineData(priceHistory: PricePoint[], points: numbe
       if (error instanceof Error) {
         span.recordException(error);
       }
+      log.error('price-engine', 'marketplace.price.sparkline', {
+        error: error instanceof Error ? error.message : 'unknown',
+        points,
+      });
       // Create dedicated error child span with stack trace
-      await withErrorSpan(priceTracer, error, {
+      await withErrorSpan(redisTracer, error, {
         [MA.ERROR_ORIGIN_SPAN]: 'marketplace.price.sparkline',
       });
       throw error;
@@ -119,7 +125,7 @@ export async function getOHLCData(
   timeframeMinutes: number,
   intervalMinutes: number
 ): Promise<{ timestamp: number; open: number; high: number; low: number; close: number }[]> {
-  return priceTracer.startActiveSpan('marketplace.price.ohlc', {
+  return redisTracer.startActiveSpan('marketplace.price.ohlc', {
     attributes: {
       [MA.CHART_TIMEFRAME]: `${timeframeMinutes}m`,
       [MA.CHART_INTERVAL]: `${intervalMinutes}m`,
@@ -193,8 +199,12 @@ export async function getOHLCData(
       if (error instanceof Error) {
         span.recordException(error);
       }
+      log.error('price-engine', 'marketplace.price.ohlc', {
+        error: error instanceof Error ? error.message : 'unknown',
+        timeframe: `${timeframeMinutes}m`, interval: `${intervalMinutes}m`,
+      });
       // Create dedicated error child span with stack trace
-      await withErrorSpan(priceTracer, error, {
+      await withErrorSpan(redisTracer, error, {
         [MA.ERROR_ORIGIN_SPAN]: 'marketplace.price.ohlc',
       });
       throw error;

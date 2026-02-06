@@ -13,7 +13,8 @@
 import { NextResponse } from "next/server";
 import { Span, SpanStatusCode } from "@opentelemetry/api";
 import { MarketplaceError } from "./errors";
-import { apiTracer, withErrorSpan, MarketplaceAttributes as MA } from "./tracing";
+import { ddTracer, withErrorSpan, MarketplaceAttributes as MA } from "./tracing";
+import { log } from "./logger";
 
 // ---------------------------------------------------------------------------
 // Response Types
@@ -83,6 +84,11 @@ export async function handleRouteError(error: unknown, span: Span): Promise<Next
 
   if (error instanceof MarketplaceError) {
     // ---- Known marketplace error ----
+    log.error('api-gateway', 'request_failed', {
+      code: error.code, status: error.statusCode, type: error.name,
+      message: error.message, requestId,
+      context: error.context ? JSON.stringify(error.context) : undefined,
+    });
     span.setStatus({
       code: SpanStatusCode.ERROR,
       message: `${error.code}: ${error.message}`,
@@ -99,7 +105,7 @@ export async function handleRouteError(error: unknown, span: Span): Promise<Next
     span.recordException(error);
 
     // Create a dedicated error response builder span
-    await withErrorSpan(apiTracer, error, {
+    await withErrorSpan(ddTracer, error, {
       [MA.ERROR_REQUEST_ID]: requestId,
       [MA.ERROR_ORIGIN_SPAN]: 'route_handler',
     });
@@ -123,6 +129,11 @@ export async function handleRouteError(error: unknown, span: Span): Promise<Next
   const message = error instanceof Error ? error.message : 'An unexpected error occurred';
   const stack = error instanceof Error ? error.stack : undefined;
 
+  log.error('api-gateway', 'unexpected_error', {
+    code: 'INTERNAL_ERROR', status: 500, type: 'UnknownError',
+    message, requestId, stack: stack?.split('\n')[1]?.trim(),
+  });
+
   span.setStatus({
     code: SpanStatusCode.ERROR,
     message: `INTERNAL_ERROR: ${message}`,
@@ -138,7 +149,7 @@ export async function handleRouteError(error: unknown, span: Span): Promise<Next
   }
 
   // Create a dedicated error response builder span
-  await withErrorSpan(apiTracer, error, {
+  await withErrorSpan(ddTracer, error, {
     [MA.ERROR_REQUEST_ID]: requestId,
     [MA.ERROR_ORIGIN_SPAN]: 'route_handler',
   });

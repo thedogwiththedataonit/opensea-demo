@@ -14,10 +14,11 @@ import { collections } from "@/app/lib/data/collections";
 import { ensurePriceEngine } from "@/app/lib/price-engine";
 import { simulateLatency, simulateDbLatency } from "@/app/lib/utils";
 import { SpanStatusCode } from "@opentelemetry/api";
-import { apiTracer, dataTracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
+import { apiTracer, mongoTracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
 import { handleRouteError } from "@/app/lib/error-handler";
 import { maybeFault } from "@/app/lib/busybox";
 import { NotFoundError } from "@/app/lib/errors";
+import { log } from "@/app/lib/logger";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +36,8 @@ export async function GET(
       [MA.COLLECTION_SLUG]: slug,
     },
   }, async (rootSpan) => {
+    const _start = Date.now();
+    log.info('api-gateway', 'GET /api/collections/[slug]', { slug });
     try {
       maybeFault('http500', { route: '/api/collections/[slug]', slug });
       maybeFault('http502', { route: '/api/collections/[slug]' });
@@ -43,7 +46,7 @@ export async function GET(
 
       await simulateLatency(20, 60);
 
-      const collection = await withSpan(dataTracer, 'marketplace.collection.lookup', {
+      const collection = await withSpan(mongoTracer, 'marketplace.collection.lookup', {
         [MA.COLLECTION_SLUG]: slug,
         [MA.DB_OPERATION]: 'read',
         [MA.DB_COLLECTION]: 'collections',
@@ -69,6 +72,15 @@ export async function GET(
       rootSpan.setAttribute(MA.HTTP_STATUS_CODE, 200);
       rootSpan.setAttribute(MA.RESPONSE_ITEMS, 1);
       rootSpan.setStatus({ code: SpanStatusCode.OK });
+      log.info('data-service', 'collection_viewed', {
+        status: 200, duration: `${Date.now() - _start}ms`,
+        collection: collection.name, slug, chain: collection.chain,
+        floor: `${collection.floorPrice.toFixed(4)} ${collection.floorCurrency}`,
+        volume: `${Math.round(collection.totalVolume/1000)}K ${collection.totalVolumeCurrency}`,
+        items: collection.itemCount, owners: collection.ownerCount,
+        change24h: `${collection.change1d >= 0 ? '+' : ''}${collection.change1d.toFixed(1)}%`,
+        verified: collection.verified,
+      });
       return NextResponse.json(collection);
     } catch (error) {
       return await handleRouteError(error, rootSpan);

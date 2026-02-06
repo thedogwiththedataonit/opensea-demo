@@ -26,6 +26,7 @@ import {
   UnprocessableError,
   TimeoutError,
 } from './errors';
+import { log } from './logger';
 
 // ---------------------------------------------------------------------------
 // State Types
@@ -95,7 +96,11 @@ export function setBusyboxState(partial: Partial<BusyboxState>): BusyboxState {
   if (partial.enabledFaults) {
     Object.assign(state.enabledFaults, partial.enabledFaults);
   }
-  return getBusyboxState();
+  const updated = getBusyboxState();
+  log.info('busybox', 'state_updated', {
+    enabled: updated.enabled, errorRate: `${Math.round(updated.errorRate * 100)}%`,
+  });
+  return updated;
 }
 
 // ---------------------------------------------------------------------------
@@ -127,6 +132,11 @@ export function maybeFault(
   context?: Record<string, unknown>
 ): void {
   if (!shouldInjectFault(faultType)) return;
+
+  log.warn('busybox', 'fault_injected', {
+    type: faultType, route: context?.route as string, rate: `${Math.round(state.errorRate * 100)}%`,
+    token: context?.token as string, slug: context?.slug as string,
+  });
 
   const faultContext = {
     ...context,

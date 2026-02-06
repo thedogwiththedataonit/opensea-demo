@@ -15,10 +15,11 @@ import { tokens } from "@/app/lib/data/tokens";
 import { ensurePriceEngine, getOHLCData } from "@/app/lib/price-engine";
 import { simulateLatency, simulateDbLatency } from "@/app/lib/utils";
 import { SpanStatusCode } from "@opentelemetry/api";
-import { apiTracer, dataTracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
+import { apiTracer, mongoTracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
 import { handleRouteError } from "@/app/lib/error-handler";
 import { maybeFault } from "@/app/lib/busybox";
 import { NotFoundError, ValidationError } from "@/app/lib/errors";
+import { log } from "@/app/lib/logger";
 
 export const dynamic = "force-dynamic";
 
@@ -42,6 +43,8 @@ export async function GET(
       [MA.CHAIN]: chain, [MA.TOKEN_ADDRESS]: address, [MA.CHART_TIMEFRAME]: timeframe, [MA.CHART_INTERVAL]: interval,
     },
   }, async (rootSpan) => {
+    const _start = Date.now();
+    log.info('api-gateway', 'GET /api/tokens/[chain]/[address]/chart', { chain, address, timeframe, interval });
     try {
       maybeFault('http500', { route: '/api/tokens/[chain]/[address]/chart', chain, address });
       maybeFault('http502', { route: '/api/tokens/[chain]/[address]/chart' });
@@ -58,7 +61,7 @@ export async function GET(
 
       await simulateLatency(40, 100);
 
-      const token = await withSpan(dataTracer, 'marketplace.token.chart.lookup', {
+      const token = await withSpan(mongoTracer, 'marketplace.token.chart.lookup', {
         [MA.CHAIN]: chain, [MA.TOKEN_ADDRESS]: address,
         [MA.DB_OPERATION]: 'read', [MA.DB_COLLECTION]: 'tokens', [MA.DATA_SOURCE]: 'in-memory',
       }, async (span) => {
@@ -86,6 +89,17 @@ export async function GET(
       rootSpan.setAttribute(MA.HTTP_STATUS_CODE, 200);
       rootSpan.setAttribute(MA.RESPONSE_ITEMS, ohlc.length);
       rootSpan.setStatus({ code: SpanStatusCode.OK });
+      const priceOpen = ohlc.length > 0 ? ohlc[0].open : 0;
+      const priceClose = ohlc.length > 0 ? ohlc[ohlc.length - 1].close : 0;
+      const pctChange = priceOpen > 0 ? ((priceClose - priceOpen) / priceOpen * 100) : 0;
+      log.info('price-engine', 'chart_generated', {
+        status: 200, duration: `${Date.now() - _start}ms`,
+        token: token.symbol, chain, timeframe, interval,
+        candles: ohlc.length,
+        open: priceOpen < 1 ? priceOpen.toFixed(6) : priceOpen.toFixed(2),
+        close: priceClose < 1 ? priceClose.toFixed(6) : priceClose.toFixed(2),
+        periodChange: `${pctChange >= 0 ? '+' : ''}${pctChange.toFixed(2)}%`,
+      });
 
       return NextResponse.json({ token: token.symbol, chain: token.chain, timeframe, interval, data: ohlc });
     } catch (error) {

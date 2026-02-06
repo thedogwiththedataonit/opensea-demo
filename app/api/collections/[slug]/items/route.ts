@@ -17,10 +17,11 @@ import { nftsByCollection } from "@/app/lib/data/collections";
 import { ensurePriceEngine } from "@/app/lib/price-engine";
 import { simulateLatency, simulateDbLatency } from "@/app/lib/utils";
 import { SpanStatusCode } from "@opentelemetry/api";
-import { apiTracer, dataTracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
+import { apiTracer, mongoTracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
 import { handleRouteError } from "@/app/lib/error-handler";
 import { maybeFault } from "@/app/lib/busybox";
 import { NotFoundError } from "@/app/lib/errors";
+import { log } from "@/app/lib/logger";
 
 export const dynamic = "force-dynamic";
 
@@ -44,6 +45,8 @@ export async function GET(
       [MA.PAGINATION_LIMIT]: limit, [MA.PAGINATION_OFFSET]: offset,
     },
   }, async (rootSpan) => {
+    const _start = Date.now();
+    log.info('api-gateway', 'GET /api/collections/[slug]/items', { slug, sort, status, limit, offset });
     try {
       maybeFault('http500', { route: '/api/collections/[slug]/items', slug });
       maybeFault('http502', { route: '/api/collections/[slug]/items' });
@@ -52,7 +55,7 @@ export async function GET(
 
       await simulateLatency(40, 120);
 
-      const nfts = await withSpan(dataTracer, 'marketplace.collection.items.lookup', {
+      const nfts = await withSpan(mongoTracer, 'marketplace.collection.items.lookup', {
         [MA.COLLECTION_SLUG]: slug,
         [MA.DB_OPERATION]: 'read', [MA.DB_COLLECTION]: 'nfts', [MA.DATA_SOURCE]: 'in-memory',
       }, async (span) => {
@@ -67,7 +70,7 @@ export async function GET(
         throw new NotFoundError('COLLECTION_NOT_FOUND', `Collection "${slug}" not found`, { slug });
       }
 
-      let filtered = await withSpan(dataTracer, 'marketplace.collection.items.filter', {
+      let filtered = await withSpan(mongoTracer, 'marketplace.collection.items.filter', {
         [MA.FILTER_STATUS]: status,
         [MA.DB_OPERATION]: 'scan', [MA.DATA_SOURCE]: 'in-memory',
       }, async (span) => {
@@ -79,7 +82,7 @@ export async function GET(
         return result;
       });
 
-      filtered = await withSpan(dataTracer, 'marketplace.collection.items.sort', {
+      filtered = await withSpan(mongoTracer, 'marketplace.collection.items.sort', {
         [MA.FILTER_SORT]: sort,
         [MA.DB_OPERATION]: 'aggregate', [MA.DATA_SOURCE]: 'in-memory',
       }, async (span) => {
@@ -98,7 +101,7 @@ export async function GET(
 
       const total = filtered.length;
       const hasMore = offset + limit < total;
-      const paginated = await withSpan(dataTracer, 'marketplace.collection.items.paginate', {
+      const paginated = await withSpan(mongoTracer, 'marketplace.collection.items.paginate', {
         [MA.PAGINATION_OFFSET]: offset, [MA.PAGINATION_LIMIT]: limit, [MA.PAGINATION_TOTAL]: total, [MA.PAGINATION_HAS_MORE]: hasMore,
         [MA.DB_OPERATION]: 'read',
       }, async (span) => {
@@ -114,6 +117,13 @@ export async function GET(
       rootSpan.setAttribute(MA.HTTP_STATUS_CODE, 200);
       rootSpan.setAttribute(MA.RESPONSE_ITEMS, paginated.length);
       rootSpan.setStatus({ code: SpanStatusCode.OK });
+      const listedCount = paginated.filter(n => n.isListed).length;
+      log.info('data-service', 'collection_items_browsed', {
+        status: 200, duration: `${Date.now() - _start}ms`,
+        collection: slug, sort, filter: status,
+        returned: paginated.length, total, listed: listedCount, unlisted: paginated.length - listedCount,
+        priceRange: listedCount > 0 ? `${Math.min(...paginated.filter(n => n.currentPrice).map(n => n.currentPrice!)).toFixed(2)}–${Math.max(...paginated.filter(n => n.currentPrice).map(n => n.currentPrice!)).toFixed(2)}` : 'N/A',
+      });
       return NextResponse.json({ data: paginated, total, limit, offset, hasMore });
     } catch (error) {
       return await handleRouteError(error, rootSpan);

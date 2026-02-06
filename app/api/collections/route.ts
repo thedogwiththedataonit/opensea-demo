@@ -17,11 +17,12 @@ import { collections } from "@/app/lib/data/collections";
 import { ensurePriceEngine } from "@/app/lib/price-engine";
 import { simulateLatency, simulateDbLatency } from "@/app/lib/utils";
 import { SpanStatusCode } from "@opentelemetry/api";
-import { apiTracer, dataTracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
+import { apiTracer, mongoTracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
 import { handleRouteError } from "@/app/lib/error-handler";
 import { maybeFault } from "@/app/lib/busybox";
 import { ValidationError } from "@/app/lib/errors";
 import { enrichCollection } from "@/app/lib/faker-enrich";
+import { log } from "@/app/lib/logger";
 
 export const dynamic = "force-dynamic";
 
@@ -44,6 +45,8 @@ export async function GET(request: NextRequest) {
       [MA.PAGINATION_LIMIT]: limit, [MA.PAGINATION_OFFSET]: offset,
     },
   }, async (rootSpan) => {
+    const _start = Date.now();
+    log.info('api-gateway', 'GET /api/collections', { chain, sort, category, limit, offset });
     try {
       maybeFault('http500', { route: '/api/collections' });
       maybeFault('http502', { route: '/api/collections' });
@@ -59,7 +62,7 @@ export async function GET(request: NextRequest) {
 
       await simulateLatency(30, 90);
 
-      let filtered = await withSpan(dataTracer, 'marketplace.collections.filter', {
+      let filtered = await withSpan(mongoTracer, 'marketplace.collections.filter', {
         [MA.FILTER_CHAIN]: chain, [MA.FILTER_CATEGORY]: category, [MA.SEARCH_QUERY]: q,
         [MA.DB_OPERATION]: 'scan', [MA.DB_COLLECTION]: 'collections', [MA.DATA_SOURCE]: 'in-memory',
       }, async (span) => {
@@ -73,7 +76,7 @@ export async function GET(request: NextRequest) {
         return result;
       });
 
-      filtered = await withSpan(dataTracer, 'marketplace.collections.sort', {
+      filtered = await withSpan(mongoTracer, 'marketplace.collections.sort', {
         [MA.FILTER_SORT]: sort, [MA.DB_OPERATION]: 'aggregate', [MA.DATA_SOURCE]: 'in-memory',
       }, async (span) => {
         const delayMs = await simulateDbLatency('cache_hit');
@@ -94,7 +97,7 @@ export async function GET(request: NextRequest) {
       const total = filtered.length;
       const hasMore = offset + limit < total;
 
-      const paginated = await withSpan(dataTracer, 'marketplace.collections.paginate', {
+      const paginated = await withSpan(mongoTracer, 'marketplace.collections.paginate', {
         [MA.PAGINATION_OFFSET]: offset, [MA.PAGINATION_LIMIT]: limit, [MA.PAGINATION_TOTAL]: total, [MA.PAGINATION_HAS_MORE]: hasMore,
         [MA.DB_OPERATION]: 'read',
       }, async (span) => {
@@ -113,6 +116,12 @@ export async function GET(request: NextRequest) {
       rootSpan.setAttribute(MA.HTTP_STATUS_CODE, 200);
       rootSpan.setAttribute(MA.RESPONSE_ITEMS, enriched.length);
       rootSpan.setStatus({ code: SpanStatusCode.OK });
+      const topResult = enriched[0];
+      log.info('data-service', 'collections_listed', {
+        status: 200, duration: `${Date.now() - _start}ms`, results: enriched.length, total,
+        chain, sort, category: category !== 'all' ? category : undefined,
+        topCollection: topResult ? `${topResult.name} (floor=${topResult.floorPrice.toFixed(2)} ${topResult.floorCurrency}, vol=${Math.round(topResult.totalVolume/1000)}K)` : undefined,
+      });
       return NextResponse.json({ data: enriched, total, limit, offset, hasMore });
     } catch (error) {
       return await handleRouteError(error, rootSpan);

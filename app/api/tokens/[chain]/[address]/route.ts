@@ -17,12 +17,13 @@ import { tokens } from "@/app/lib/data/tokens";
 import { ensurePriceEngine } from "@/app/lib/price-engine";
 import { simulateLatency, simulateDbLatency } from "@/app/lib/utils";
 import { SpanStatusCode } from "@opentelemetry/api";
-import { apiTracer, dataTracer, enrichTracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
+import { apiTracer, mongoTracer, alchemyTracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
 import { handleRouteError } from "@/app/lib/error-handler";
 import { maybeFault } from "@/app/lib/busybox";
 import { NotFoundError } from "@/app/lib/errors";
 import { faker } from "@faker-js/faker";
 import { enrichTokenFields, generateRecentTransactions } from "@/app/lib/faker-enrich";
+import { log } from "@/app/lib/logger";
 
 export const dynamic = "force-dynamic";
 
@@ -86,6 +87,8 @@ export async function GET(
       [MA.CHAIN]: chain, [MA.TOKEN_ADDRESS]: address,
     },
   }, async (rootSpan) => {
+    const _start = Date.now();
+    log.info('api-gateway', 'GET /api/tokens/[chain]/[address]', { chain, address });
     try {
       maybeFault('http500', { route: '/api/tokens/[chain]/[address]', chain, address });
       maybeFault('http502', { route: '/api/tokens/[chain]/[address]' });
@@ -94,7 +97,7 @@ export async function GET(
 
       await simulateLatency(20, 60);
 
-      const token = await withSpan(dataTracer, 'marketplace.token.lookup', {
+      const token = await withSpan(mongoTracer, 'marketplace.token.lookup', {
         [MA.CHAIN]: chain, [MA.TOKEN_ADDRESS]: address,
         [MA.DB_OPERATION]: 'read', [MA.DB_COLLECTION]: 'tokens', [MA.DATA_SOURCE]: 'in-memory',
       }, async (span) => {
@@ -115,10 +118,10 @@ export async function GET(
       }
 
       // Generate dynamic holder data via faker.js
-      const holders = await withSpan(enrichTracer, 'marketplace.token.holders_generation', {
+      const holders = await withSpan(alchemyTracer, 'marketplace.token.holders_generation', {
         [MA.CHAIN]: chain, [MA.TOKEN_ADDRESS]: address,
-        [MA.DB_OPERATION]: 'read', [MA.DB_COLLECTION]: 'holders', [MA.DATA_SOURCE]: 'blockchain_index',
-        [MA.ENRICHMENT_SOURCE]: 'faker',
+        [MA.DB_OPERATION]: 'read', [MA.DB_COLLECTION]: 'holders', [MA.DATA_SOURCE]: 'alchemy-nft-api',
+        [MA.ENRICHMENT_SOURCE]: 'alchemy',
       }, async (span) => {
         const delayMs = await simulateDbLatency('db_read');
         span.setAttribute(MA.DB_DURATION_MS, delayMs);
@@ -137,6 +140,15 @@ export async function GET(
       rootSpan.setAttribute(MA.HTTP_STATUS_CODE, 200);
       rootSpan.setAttribute(MA.RESPONSE_ITEMS, 1);
       rootSpan.setStatus({ code: SpanStatusCode.OK });
+      log.info('data-service', 'token_viewed', {
+        status: 200, duration: `${Date.now() - _start}ms`,
+        token: token.name, symbol: token.symbol, chain,
+        price: `$${enriched.price < 1 ? enriched.price.toFixed(6) : enriched.price.toFixed(2)}`,
+        fdv: `$${Math.round(enriched.fdv / 1e6)}M`, volume24h: `$${Math.round(enriched.volume1d / 1e6)}M`,
+        change24h: `${enriched.change1d >= 0 ? '+' : ''}${enriched.change1d.toFixed(1)}%`,
+        holders: holders.length, topHolder: `${holders[0]?.displayName} (${holders[0]?.percentage.toFixed(1)}%)`,
+        recentTxns: recentTransactions.length, verified: token.verified, isNew: token.isNew,
+      });
       const { priceHistory, ...tokenData } = token;
       return NextResponse.json({
         ...tokenData,
