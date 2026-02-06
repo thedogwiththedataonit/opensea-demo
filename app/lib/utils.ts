@@ -8,6 +8,7 @@
 
 import { apiTracer, MarketplaceAttributes as MA } from './tracing';
 import { shouldInjectFault } from './busybox';
+import { TimeoutError } from './errors';
 import { log } from './logger';
 
 // ---------------------------------------------------------------------------
@@ -40,6 +41,58 @@ export async function simulateDbLatency(profile: LatencyProfile): Promise<number
   const delay = Math.round(min + Math.random() * (max - min));
   await new Promise((resolve) => setTimeout(resolve, delay));
   return delay;
+}
+
+// ---------------------------------------------------------------------------
+// Third-Party Service Timeout Simulation
+// ---------------------------------------------------------------------------
+
+/**
+ * Simulates a third-party service timing out after its configured timeout window.
+ *
+ * When busybox `timeout` fault is enabled, this function probabilistically:
+ *  1. Waits 5-10 seconds (compressed simulation of a 60s real timeout)
+ *  2. Throws a TimeoutError with the service name and timeout metadata
+ *
+ * Call this inside third-party service spans (chainlink, alchemy, coingecko, etc.)
+ * AFTER the normal delay but BEFORE doing any work.
+ *
+ * @param serviceName  - The third-party service that timed out (e.g. "chainlink-oracle")
+ * @param operationName - What was being called (e.g. "ETH/USD price feed")
+ * @param timeoutMs     - The configured timeout in ms (default 60000 = 1 minute)
+ */
+export async function maybeServiceTimeout(
+  serviceName: string,
+  operationName: string,
+  timeoutMs: number = 60000
+): Promise<void> {
+  if (!shouldInjectFault('timeout')) return;
+
+  // Compressed wait: 5-10s in dev to represent a 60s timeout in production
+  const simulatedWait = Math.round(5000 + Math.random() * 5000);
+
+  log.error('api-gateway', 'service_timeout', {
+    service: serviceName,
+    operation: operationName,
+    timeout: `${timeoutMs}ms`,
+    waited: `${simulatedWait}ms`,
+    message: `${serviceName} did not respond within ${timeoutMs / 1000}s`,
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, simulatedWait));
+
+  throw new TimeoutError(
+    'SERVICE_TIMEOUT',
+    `${serviceName} timed out after ${timeoutMs / 1000}s while calling ${operationName}`,
+    {
+      service: serviceName,
+      operation: operationName,
+      timeoutMs,
+      simulatedWaitMs: simulatedWait,
+      busybox: true,
+      faultType: 'timeout',
+    }
+  );
 }
 
 // ---------------------------------------------------------------------------

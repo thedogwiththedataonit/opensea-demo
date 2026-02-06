@@ -156,7 +156,15 @@ export async function withErrorSpan(
       const me = error as { code?: string; statusCode?: number; context?: Record<string, unknown> };
       if (me.code) span.setAttribute(MA.ERROR_CODE, me.code);
       if (me.statusCode) span.setAttribute(MA.ERROR_STATUS_CODE, me.statusCode);
-      if (me.context) span.setAttribute(MA.ERROR_CONTEXT, JSON.stringify(me.context));
+      if (me.context) {
+        span.setAttribute(MA.ERROR_CONTEXT, JSON.stringify(me.context));
+        // Service timeout-specific attributes
+        const ctx = me.context as Record<string, unknown>;
+        if (ctx.service) span.setAttribute('marketplace.timeout.service', String(ctx.service));
+        if (ctx.operation) span.setAttribute('marketplace.timeout.operation', String(ctx.operation));
+        if (ctx.timeoutMs) span.setAttribute('marketplace.timeout.threshold_ms', Number(ctx.timeoutMs));
+        if (ctx.simulatedWaitMs) span.setAttribute('marketplace.timeout.waited_ms', Number(ctx.simulatedWaitMs));
+      }
 
       // Simulate error processing time
       await new Promise((resolve) => setTimeout(resolve, processingMs));

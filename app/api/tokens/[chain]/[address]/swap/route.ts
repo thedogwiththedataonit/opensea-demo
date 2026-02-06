@@ -16,7 +16,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { tokens } from "@/app/lib/data/tokens";
 import { ensurePriceEngine } from "@/app/lib/price-engine";
-import { simulateLatency, simulateDbLatency } from "@/app/lib/utils";
+import { simulateLatency, simulateDbLatency, maybeServiceTimeout } from "@/app/lib/utils";
 import { SwapQuote } from "@/app/lib/data/types";
 import { SpanStatusCode } from "@opentelemetry/api";
 import { apiTracer, mongoTracer, chainlinkTracer, uniswapTracer, gasTracer, withSpan, MarketplaceAttributes as MA } from "@/app/lib/tracing";
@@ -113,6 +113,10 @@ export async function POST(
       }, async (span) => {
         const delayMs = await simulateDbLatency('external_api');
         span.setAttribute(MA.DB_DURATION_MS, delayMs);
+
+        // Third-party service timeout check (chainlink-oracle)
+        await maybeServiceTimeout('chainlink-oracle', `latestRoundData(${fromToken}/USD)`);
+
         const from = fromToken === "SOL" ? 195.42 : fromToken === "ETH" ? 1879.47 : 1;
         const to = targetToken.price;
         const usd = amount * from;
@@ -131,6 +135,9 @@ export async function POST(
       }, async (span) => {
         const delayMs = await simulateDbLatency('db_aggregate');
         span.setAttribute(MA.DB_DURATION_MS, delayMs);
+
+        // Third-party service timeout check (uniswap-router)
+        await maybeServiceTimeout('uniswap-router', `quoteExactInputSingle(${fromToken}→${targetToken.symbol})`);
 
         const impact = Math.min(fromValueUsd / (targetToken.volume1d || 1) * 100, 50);
         const swapFee = fromValueUsd * 0.003;

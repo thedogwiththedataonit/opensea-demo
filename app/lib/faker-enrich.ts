@@ -10,7 +10,7 @@
 import { faker } from "@faker-js/faker";
 import { Collection } from "./data/types";
 import { alchemyTracer, coingeckoTracer, chainlinkTracer, etherscanTracer, reservoirTracer, withSpan, MarketplaceAttributes as MA } from "./tracing";
-import { simulateDbLatency } from "./utils";
+import { simulateDbLatency, maybeServiceTimeout } from "./utils";
 import { log } from "./logger";
 
 // ---- Price / stat fluctuation helpers ----
@@ -31,6 +31,10 @@ export async function enrichCollection(c: Collection): Promise<Collection & { re
   }, async (span) => {
     const delayMs = await simulateDbLatency('enrichment');
     span.setAttribute(MA.DB_DURATION_MS, delayMs);
+
+    // Third-party service timeout check (alchemy-nft-api)
+    await maybeServiceTimeout('alchemy-nft-api', `getNFTMetadata(${c.slug})`);
+
     log.debug('enrichment', 'collection_enriched', { slug: c.slug, floor: `${c.floorPrice.toFixed(2)} ${c.floorCurrency}`, owners: c.ownerCount, delay: `${delayMs}ms` });
 
     faker.seed(undefined);
@@ -82,6 +86,10 @@ export async function generateMarketplaceStats(): Promise<MarketplaceStats> {
   }, async (span) => {
     const delayMs = await simulateDbLatency('external_api');
     span.setAttribute(MA.DB_DURATION_MS, delayMs);
+
+    // Third-party service timeout check (chainlink-oracle)
+    await maybeServiceTimeout('chainlink-oracle', 'latestRoundData(ETH/USD)');
+
     log.debug('enrichment', 'marketplace_stats_fetched', { source: 'price_oracle', delay: `${delayMs}ms` });
 
     faker.seed(undefined);
@@ -118,6 +126,10 @@ export async function enrichTokenFields(t: EnrichedTokenFields): Promise<Enriche
   }, async (span) => {
     const delayMs = await simulateDbLatency('enrichment');
     span.setAttribute(MA.DB_DURATION_MS, delayMs);
+
+    // Third-party service timeout check (coingecko-api)
+    await maybeServiceTimeout('coingecko-api', 'coins/markets');
+
     log.debug('enrichment', 'token_price_enriched', { price: `$${t.price < 1 ? t.price.toFixed(6) : t.price.toFixed(2)}`, delay: `${delayMs}ms` });
 
     faker.seed(undefined);
@@ -159,6 +171,10 @@ export async function generateRecentTransactions(symbol: string, price: number, 
   }, async (span) => {
     const delayMs = await simulateDbLatency('db_read');
     span.setAttribute(MA.DB_DURATION_MS, delayMs);
+
+    // Third-party service timeout check (etherscan-api)
+    await maybeServiceTimeout('etherscan-api', `txlist(${symbol})`);
+
     log.debug('enrichment', 'recent_transactions_generated', { token: symbol, count, pricePerUnit: `$${price < 1 ? price.toFixed(6) : price.toFixed(2)}`, delay: `${delayMs}ms` });
 
     faker.seed(undefined);
