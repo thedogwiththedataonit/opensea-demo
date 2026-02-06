@@ -29,6 +29,13 @@ function parseTraceparent(header: string | null): { traceId: string; spanId: str
   return match ? { traceId: match[1], spanId: match[2] } : null;
 }
 
+/** Generate a 32-char hex trace ID for edge log correlation only (not injected into headers) */
+function generateEdgeLogTraceId(): string {
+  let id = '';
+  for (let i = 0; i < 32; i++) id += Math.floor(Math.random() * 16).toString(16);
+  return id;
+}
+
 /** Generate a 16-char hex span ID for edge log correlation only */
 function generateEdgeLogSpanId(): string {
   let id = '';
@@ -158,10 +165,12 @@ export async function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname;
   const chaosEnabled = isChaosEnabled(request);
 
-  // Read existing trace context (set by Next.js auto-instrumentation) — never overwrite
+  // Read existing trace context if present, otherwise generate a log-only traceId.
+  // This ID is ONLY used in structured logs for correlation — it is NOT injected
+  // into the traceparent header (Next.js handles trace propagation natively).
   const traceCtx = parseTraceparent(request.headers.get('traceparent'));
-  const traceId = traceCtx?.traceId || '00000000000000000000000000000000';
-  const edgeLogSpanId = generateEdgeLogSpanId(); // For log correlation only
+  const traceId = traceCtx?.traceId || generateEdgeLogTraceId();
+  const edgeLogSpanId = generateEdgeLogSpanId();
 
   edgeLog('INFO', 'request_received', traceId, edgeLogSpanId, {
     method, path, region, requestId, chaos: chaosEnabled || undefined,
